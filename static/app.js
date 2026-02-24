@@ -707,20 +707,33 @@ function handleProgress(data) {
     };
     document.getElementById('progressText').textContent = statusMap[data.status] || data.status;
 
-    // Stats - luôn hiển thị từ data
-    const d = data.downloaded ?? 0, s = data.skipped ?? 0, f = data.failed ?? 0;
-    const fs = data.filtered_stock ?? 0, ft = data.filtered_time ?? 0;
+    // Stats - chỉ hiển thị thông tin tải chính, không có lỗi/lọc
+    const d = data.downloaded ?? 0, s = data.skipped ?? 0;
     const ds = data.drive_synced ?? 0;
-    let statsText = `Tải: ${d} | Bỏ qua: ${s} | Lỗi: ${f}`;
+    let statsText = `Tải: ${d} | Bỏ qua: ${s}`;
     if (ds > 0) statsText += ` | Drive: ${ds}`;
     if (data.total_tickers > 1) statsText += ` | Tickers: ${data.ticker_index}/${data.total_tickers}`;
-    if (fs > 0 || ft > 0) {
-        let parts = [];
-        if (fs > 0) parts.push(`${fs} mã`);
-        if (ft > 0) parts.push(`${ft} thời gian`);
-        statsText += ` | Lọc: ${parts.join(' + ')}`;
-    }
     document.getElementById('progressStats').textContent = statsText;
+
+    // Notes - lỗi + lọc thọi gian (màu đỏ, in nghiêng, tách biệt)
+    const notes = document.getElementById('progressNotes');
+    if (notes) {
+        let html = '';
+        // Error details
+        const errDetails = data.error_details || [];
+        if (errDetails.length > 0) {
+            errDetails.forEach(e => {
+                html += `<div class="note-item">⚠ ${e.ticker}: ${e.file} — ${e.error}</div>`;
+            });
+        }
+        // Filter info
+        const ft = data.filtered_time ?? 0;
+        if (ft > 0) {
+            const timeRange = data.time_range || '';
+            html += `<div class="note-item">⏭ ${ft} entries ngoài khoảng thời gian ${timeRange ? '(' + timeRange + ')' : ''}</div>`;
+        }
+        notes.innerHTML = html;
+    }
 
     // Cập nhật header + bảng thống kê tức thì khi có dữ liệu mới
     if (data.stats_summary) {
@@ -748,10 +761,9 @@ function handleProgress(data) {
         loadStats();
         loadHistory();
         if (data.status === 'completed' && lastProgressStatus !== 'completed') {
-            let msg = `Scraping hoàn thành! Tải: ${d}, Bỏ qua: ${s}, Lỗi: ${f}`;
-            if (d === 0 && s === 0 && f === 0 && (fs > 0 || ft > 0)) {
-                msg += `. Tất cả entry bị lọc bỏ (mã: ${fs}, thời gian: ${ft}). Thử mở rộng bộ lọc hoặc bỏ chọn Ngành/Sàn/Chỉ số để tải tất cả.`;
-            }
+            const f = data.failed ?? 0;
+            let msg = `Scraping hoàn thành! Tải: ${d}, Bỏ qua: ${s}`;
+            if (f > 0) msg += `, Lỗi: ${f}`;
             toast(msg, d > 0 ? 'success' : 'info');
         }
         lastProgressStatus = data.status;
@@ -824,10 +836,16 @@ function formatDate(iso) {
 }
 
 function toast(message, type = 'info') {
+    const container = document.getElementById('toastContainer');
+    if (!container) return;
     const el = document.createElement('div');
     el.className = `toast ${type}`;
     el.textContent = message;
-    document.body.appendChild(el);
+    container.appendChild(el);
+    // Max 3 visible toasts
+    while (container.children.length > 3) {
+        container.removeChild(container.firstChild);
+    }
     setTimeout(() => {
         el.style.opacity = '0';
         el.style.transform = 'translateX(100%)';

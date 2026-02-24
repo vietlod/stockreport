@@ -417,6 +417,7 @@ class CafeFScraper:
         self.skipped = 0
         self.filtered_stock = 0   # Bỏ qua vì không trong danh sách mã chọn
         self.filtered_time = 0    # Bỏ qua vì ngoài khoảng thời gian
+        self.error_details = []   # Chi tiết lỗi: [{ticker, file, error}]
         self.history = DownloadHistory(PDF_DIR)
         self.on_download_callback = None  # Optional: (dest: Path) -> None, gọi sau mỗi download thành công
         # Multi-ticker progress tracking
@@ -713,6 +714,11 @@ class CafeFScraper:
                 self.skipped += 1
             else:
                 self.failed += 1
+                self.error_details.append({
+                    "ticker": stock,
+                    "file": filename,
+                    "error": f"Tải thất bại sau 3 lần thử",
+                })
 
     def _search_ticker_on_cafef(self, page, ticker: str) -> dict:
         """Dùng CafeF IformationDisclosure search để filter theo 1 mã CK.

@@ -17,6 +17,7 @@ Tất cả thay đổi đáng chú ý của dự án được ghi nhận tại �
 #### Background Sync (`server.py`)
 - **SyncJob class**: chạy Drive/Sheet sync trong daemon thread, độc lập browser
 - **Concurrent**: Drive và Sheet chạy đồng thời, không chặn lẫn nhau
+- **Auto Sheet sync**: tự động sync Sheet sau khi scraping hoàn tất (nếu có file mới)
 - Endpoint trả response ngay (`{"status": "started"}`), sync tiếp tục chạy nền
 - Broadcast tiến trình qua WebSocket (`type: sync_progress`)
 - `GET /api/sync/status` — trả trạng thái cả Drive và Sheet
@@ -35,6 +36,10 @@ Tất cả thay đổi đáng chú ý của dự án được ghi nhận tại �
 - **Header**: user avatar + dropdown menu (thay nút Logout)
 - **Settings modal**: glassmorphism overlay, slide-up animation
 - **WebSocket sync progress**: live toast notifications cho Drive upload + Sheet sync
+- **Toast stacking**: fix toast chồng lên nhau — dùng `#toastContainer` flexbox, max 3 visible
+- **Progress notes**: tách Lỗi/Lọc ra mục ghi chú riêng (màu đỏ, in nghiêng) dưới khung tiến trình
+  - Chi tiết lỗi: hiển ticker + filename + thông tin lỗi cụ thể
+  - Diễn giải bộ lọc thời gian: hiển số entries bị lọc + khoảng thời gian
 
 ### 🐛 Bugfixes
 

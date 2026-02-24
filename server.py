@@ -200,6 +200,12 @@ class ScrapeJob:
                 self.progress["filtered_stock"] = scraper.filtered_stock
                 self.progress["filtered_time"] = scraper.filtered_time
                 self.progress["drive_synced"] = drive_sync_count[0]
+                self.progress["error_details"] = scraper.error_details[-5:]  # Last 5
+                # Time range context cho frontend
+                if scraper_module.TIME_FROM_YEAR or scraper_module.TIME_TO_YEAR:
+                    fr = f"{scraper_module.TIME_FROM_YEAR or ''}{'Q'+scraper_module.TIME_FROM_QUARTER if scraper_module.TIME_FROM_QUARTER else ''}"
+                    to = f"{scraper_module.TIME_TO_YEAR or ''}{'Q'+scraper_module.TIME_TO_QUARTER if scraper_module.TIME_TO_QUARTER else ''}"
+                    self.progress["time_range"] = f"{fr or '*'} → {to or '*'}"
                 summary = get_stats_summary_sync()
                 if summary:
                     self.progress["stats_summary"] = summary
@@ -228,6 +234,7 @@ class ScrapeJob:
             self.progress["filtered_stock"] = scraper.filtered_stock
             self.progress["filtered_time"] = scraper.filtered_time
             self.progress["drive_synced"] = drive_sync_count[0]
+            self.progress["error_details"] = scraper.error_details[-5:]
             self.progress["stats_summary"] = get_stats_summary_sync()
             self.progress["status"] = "completed"
             self.progress["completed_at"] = datetime.now().isoformat()
@@ -255,6 +262,15 @@ class ScrapeJob:
         finally:
             self.running = False
             self._broadcast_sync({"type": "progress", **self.progress})
+            # Auto Sheet sync: trigger nếu scraping thành công và có download
+            if self.progress.get("status") == "completed" and self.progress.get("downloaded", 0) > 0:
+                try:
+                    log.info("📊 Auto Sheet sync: khởi tạo sau khi scraping hoàn tất...")
+                    if self.loop and not sync_job._sheet_running:
+                        sync_job.start_sheet(self.loop)
+                        log.info("📊 Auto Sheet sync: đã bắt đầu chạy nền")
+                except Exception as e:
+                    log.warning(f"📊 Auto Sheet sync error: {e}")
 
 scrape_job = ScrapeJob()
 
