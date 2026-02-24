@@ -503,11 +503,17 @@ function logout() {
 }
 
 // ── WebSocket ──────────────────────────────────────────────────────────────
+let wsReconnectDelay = 3000;
+const WS_MAX_DELAY = 60000;
+
 function connectWebSocket() {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     const ws = new WebSocket(`${proto}//${location.host}/ws/progress`);
 
-    ws.onopen = () => { console.log('WS connected'); };
+    ws.onopen = () => {
+        wsReconnectDelay = 3000;
+        state.ws = ws;
+    };
 
     ws.onmessage = (msg) => {
         try {
@@ -519,20 +525,22 @@ function connectWebSocket() {
     };
 
     ws.onclose = () => {
-        console.log('WS disconnected, reconnecting in 3s...');
-        setTimeout(connectWebSocket, 3000);
+        state.ws = null;
+        const delay = wsReconnectDelay;
+        wsReconnectDelay = Math.min(wsReconnectDelay * 1.5, WS_MAX_DELAY);
+        setTimeout(connectWebSocket, delay);
     };
 
     ws.onerror = () => ws.close();
 
-    state.ws = ws;
-
     // Keepalive ping
-    setInterval(() => {
+    const pingInterval = setInterval(() => {
         if (ws.readyState === WebSocket.OPEN) {
             ws.send('ping');
+        } else {
+            clearInterval(pingInterval);
         }
-    }, 30000);
+    }, 25000);
 }
 
 function handleProgress(data) {
