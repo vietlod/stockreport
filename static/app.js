@@ -772,11 +772,25 @@ function updateUserMenu() {
 
 // ── Google Sign-In ─────────────────────────────────────────────────────────
 async function initGoogleSignIn() {
+    const btnEl = document.getElementById('googleSignInBtn');
+
+    // Wait for GIS library to load (async defer script)
+    let retries = 0;
+    while (typeof google === 'undefined' || !google.accounts?.id) {
+        if (retries++ > 50) {  // ~5s max
+            console.error('Google Identity Services library failed to load');
+            if (btnEl) btnEl.innerHTML = '<p style="color:var(--text-dim);font-size:0.85rem">⚠ Không thể tải Google Sign-In. Kiểm tra kết nối mạng.</p>';
+            return;
+        }
+        await new Promise(r => setTimeout(r, 100));
+    }
+
     try {
         const resp = await fetch('/api/auth/config');
         const config = await resp.json();
         if (!config.google_client_id) {
             console.error('GOOGLE_CLIENT_ID not configured on server');
+            if (btnEl) btnEl.innerHTML = '<p style="color:var(--text-dim);font-size:0.85rem">⚠ GOOGLE_CLIENT_ID chưa cấu hình</p>';
             return;
         }
         google.accounts.id.initialize({
@@ -784,7 +798,6 @@ async function initGoogleSignIn() {
             callback: handleGoogleSignIn,
             auto_select: !!state.adminToken,
         });
-        const btnEl = document.getElementById('googleSignInBtn');
         if (btnEl) {
             google.accounts.id.renderButton(btnEl, {
                 theme: 'filled_blue',
@@ -797,6 +810,7 @@ async function initGoogleSignIn() {
         }
     } catch (e) {
         console.error('Failed to init Google Sign-In:', e);
+        if (btnEl) btnEl.innerHTML = '<p style="color:var(--text-dim);font-size:0.85rem">⚠ Lỗi khởi tạo Google Sign-In</p>';
     }
 }
 
