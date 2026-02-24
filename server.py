@@ -753,6 +753,16 @@ async def oauth2_status():
     return {"connected": token_file.exists()}
 
 
+@app.get("/api/oauth2/debug")
+async def oauth2_debug():
+    """Debug: redirect_uri đang dùng (để so khớp với Google Cloud Console)."""
+    redirect_uri = os.getenv("OAUTH_REDIRECT_URI", "https://stockreport.khoviet.com/oauth2callback")
+    return {
+        "redirect_uri": redirect_uri,
+        "hint": "Đảm bảo redirect_uri này khớp CHÍNH XÁC trong Google Cloud Console → Credentials → Authorized redirect URIs",
+    }
+
+
 # ── Google Integration ──────────────────────────────────────────────────────
 
 def _check_google_drive_config():
