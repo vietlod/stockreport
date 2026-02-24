@@ -384,6 +384,7 @@ async function startScrape() {
 
     if (resp && resp.status === 'started') {
         lastProgressStatus = 'starting';
+        lastLoggedEntry = '';
         document.getElementById('progressCard').style.display = '';
         document.getElementById('btnScrape').disabled = true;
         document.getElementById('btnStop').disabled = false;
@@ -572,6 +573,7 @@ function stopPolling() {
 }
 
 let lastProgressStatus = '';
+let lastLoggedEntry = '';
 
 function handleProgress(data) {
     const card = document.getElementById('progressCard');
@@ -598,8 +600,9 @@ function handleProgress(data) {
     document.getElementById('progressStats').textContent =
         `Tải: ${d} | Bỏ qua: ${s} | Lỗi: ${f}`;
 
-    // Log entry
-    if (data.current_entry) {
+    // Log entry - chỉ thêm khi khác entry trước (tránh lặp do polling)
+    if (data.current_entry && data.current_entry !== lastLoggedEntry) {
+        lastLoggedEntry = data.current_entry;
         addLog(data.current_entry, data.status === 'error' ? 'err' : 'ok');
     }
 
