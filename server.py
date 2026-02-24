@@ -40,6 +40,9 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 import uvicorn
 
+# ── Load .env FIRST (trước mọi os.getenv) ──────────────────────────────────
+load_dotenv()
+
 # ── Google Sign-In Auth ─────────────────────────────────────────────────────
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
 ALLOWED_EMAILS = [e.strip() for e in os.getenv("ALLOWED_EMAILS", "").split(",") if e.strip()]
@@ -61,8 +64,6 @@ async def require_admin(credentials: HTTPAuthorizationCredentials = Depends(secu
 
 # ── Project imports ─────────────────────────────────────────────────────────
 from stock_data import registry as stock_registry
-
-load_dotenv()
 
 PDF_DIR = Path(os.getenv("PDF_DIR", "./pdf"))
 
