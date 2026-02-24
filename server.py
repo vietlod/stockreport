@@ -41,7 +41,8 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 import uvicorn
 
 # ── Load .env FIRST (trước mọi os.getenv) ──────────────────────────────────
-load_dotenv()
+_env_path = Path(__file__).resolve().parent / ".env"
+load_dotenv(dotenv_path=_env_path)
 
 # ── Google Sign-In Auth ─────────────────────────────────────────────────────
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")

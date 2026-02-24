@@ -62,6 +62,11 @@ HEADLESS=true
 PAGE_DELAY=1.5            # Delay giữa các trang (giây)
 DOWNLOAD_DELAY=0.5        # Delay giữa các PDF (giây)
 
+# Google Sign-In (optional)
+GOOGLE_CLIENT_ID=
+ALLOWED_EMAILS=user@example.com
+JWT_SECRET=<random-string>
+
 # Google Integration (OAuth2 only)
 GOOGLE_OAUTH_CREDENTIALS=./google_oauth_credentials.json
 OAUTH_REDIRECT_URI=https://stockreport.khoviet.com/oauth2callback
