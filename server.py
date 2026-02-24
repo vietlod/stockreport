@@ -32,10 +32,23 @@ from pathlib import Path
 from datetime import datetime
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query, Depends, HTTPException
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials, APIKeyHeader
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 import uvicorn
+
+# ── Admin Auth ──────────────────────────────────────────────────────────────
+ADMIN_USER = "tns"
+ADMIN_PASS = "123colEn"
+ADMIN_TOKEN = "stockreport_admin"  # Token returned on successful login
+
+security = HTTPBearer(auto_error=False)
+
+async def require_admin(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    if not credentials or credentials.credentials != ADMIN_TOKEN:
+        raise HTTPException(status_code=401, detail="Yêu cầu đăng nhập admin")
+    return True
 
 # ── Project imports ─────────────────────────────────────────────────────────
 from stock_data import registry as stock_registry
@@ -394,16 +407,48 @@ async def stop_scrape():
     return {"status": "stopping"}
 
 
+# ── Auth ────────────────────────────────────────────────────────────────────
+
+@app.post("/api/auth/login")
+async def auth_login(data: dict):
+    """Đăng nhập admin. Body: {username, password}"""
+    username = (data.get("username") or "").strip()
+    password = (data.get("password") or "").strip()
+    if username == ADMIN_USER and password == ADMIN_PASS:
+        return {"ok": True, "token": ADMIN_TOKEN}
+    return JSONResponse(status_code=401, content={"ok": False, "error": "Tên đăng nhập hoặc mật khẩu không đúng"})
+
+
 # ── Google Integration ──────────────────────────────────────────────────────
 
+def _check_google_drive_config():
+    """Validate Google Drive config before sync."""
+    creds_path = os.getenv("GOOGLE_SERVICE_ACCOUNT_KEY", "./google_oauth_credentials.json")
+    folder_id = os.getenv("GOOGLE_DRIVE_FOLDER_ID", "")
+    if not Path(creds_path).exists():
+        raise ValueError(f"File credentials không tồn tại: {creds_path}. Cấu hình GOOGLE_SERVICE_ACCOUNT_KEY trong .env")
+    if not folder_id:
+        raise ValueError("Chưa cấu hình GOOGLE_DRIVE_FOLDER_ID trong .env")
+
+
+def _check_google_sheet_config():
+    """Validate Google Sheet config before sync."""
+    creds_path = os.getenv("GOOGLE_SERVICE_ACCOUNT_KEY", "./google_oauth_credentials.json")
+    if not Path(creds_path).exists():
+        raise ValueError(f"File credentials không tồn tại: {creds_path}. Cấu hình GOOGLE_SERVICE_ACCOUNT_KEY trong .env")
+
+
 @app.post("/api/gdrive/sync")
-async def gdrive_sync():
-    """Upload tất cả PDF lên Google Drive."""
+async def gdrive_sync(_: bool = Depends(require_admin)):
+    """Upload tất cả PDF lên Google Drive. Yêu cầu đăng nhập admin."""
     try:
+        _check_google_drive_config()
         from google_sync import GoogleDriveSync
         sync = GoogleDriveSync()
         stats = sync.upload_all()
         return {"status": "ok", **stats}
+    except ValueError as e:
+        return JSONResponse(status_code=400, content={"error": str(e)})
     except FileNotFoundError as e:
         return JSONResponse(status_code=400, content={"error": str(e)})
     except Exception as e:
@@ -412,13 +457,16 @@ async def gdrive_sync():
 
 
 @app.post("/api/gsheet/sync")
-async def gsheet_sync():
-    """Sync metadata lên Google Sheets."""
+async def gsheet_sync(_: bool = Depends(require_admin)):
+    """Sync metadata lên Google Sheets. Yêu cầu đăng nhập admin."""
     try:
+        _check_google_sheet_config()
         from google_sync import GoogleSheetSync
         sync = GoogleSheetSync()
         result = sync.sync()
         return {"status": "ok", **result}
+    except ValueError as e:
+        return JSONResponse(status_code=400, content={"error": str(e)})
     except FileNotFoundError as e:
         return JSONResponse(status_code=400, content={"error": str(e)})
     except Exception as e:

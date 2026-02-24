@@ -6,8 +6,8 @@
 
 // ── State ──────────────────────────────────────────────────────────────────
 const state = {
-    stockData: null,        // {exchanges, industries, indexes}
-    selectedTickers: [],    // manually selected tickers
+    stockData: null,
+    selectedTickers: [],
     selectedExchanges: [],
     selectedIndustries: [],
     selectedIndexes: [],
@@ -15,10 +15,12 @@ const state = {
     historyLimit: 50,
     activeStatsTab: 'exchange',
     ws: null,
+    adminToken: localStorage.getItem('stockreport_admin') || null,
 };
 
 // ── Init ───────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
+    updateAuthUI();
     await loadStockData();
     await loadStats();
     await loadHistory();
@@ -30,13 +32,26 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 // ── API Helpers ────────────────────────────────────────────────────────────
-async function api(url, opts = {}) {
+function getHeaders(includeAuth = false) {
+    const h = { 'Content-Type': 'application/json' };
+    if (includeAuth && state.adminToken) {
+        h['Authorization'] = `Bearer ${state.adminToken}`;
+    }
+    return h;
+}
+
+async function api(url, opts = {}, requireAuth = false) {
     try {
         const resp = await fetch(url, {
-            headers: { 'Content-Type': 'application/json' },
+            headers: getHeaders(requireAuth),
             ...opts,
         });
-        return await resp.json();
+        const data = await resp.json().catch(() => ({}));
+        if (resp.status === 401 && requireAuth) {
+            showLogin();
+            return null;
+        }
+        return data;
     } catch (e) {
         console.error(`API error: ${url}`, e);
         toast(`Lỗi kết nối: ${e.message}`, 'error');
@@ -388,23 +403,88 @@ function buildScrapeConfig() {
 
 // ── Google Sync ────────────────────────────────────────────────────────────
 async function syncDrive() {
+    if (!state.adminToken) {
+        showLogin();
+        return;
+    }
     toast('Đang upload lên Google Drive...', 'info');
-    const resp = await api('/api/gdrive/sync', { method: 'POST' });
-    if (resp?.status === 'ok') {
+    const resp = await api('/api/gdrive/sync', { method: 'POST' }, true);
+    if (!resp) return;
+    if (resp.status === 'ok') {
         toast(`Upload thành công: ${resp.uploaded} files`, 'success');
     } else {
-        toast(resp?.error || 'Lỗi upload', 'error');
+        toast(resp.error || 'Lỗi upload', 'error');
     }
 }
 
 async function syncSheet() {
+    if (!state.adminToken) {
+        showLogin();
+        return;
+    }
     toast('Đang cập nhật Google Sheet...', 'info');
-    const resp = await api('/api/gsheet/sync', { method: 'POST' });
-    if (resp?.status === 'ok') {
+    const resp = await api('/api/gsheet/sync', { method: 'POST' }, true);
+    if (!resp) return;
+    if (resp.status === 'ok') {
         toast(`Đã cập nhật sheet: ${resp.rows} rows`, 'success');
     } else {
-        toast(resp?.error || 'Lỗi cập nhật', 'error');
+        toast(resp.error || 'Lỗi cập nhật', 'error');
     }
+}
+
+// ── Auth ───────────────────────────────────────────────────────────────────
+function updateAuthUI() {
+    const btnLogin = document.getElementById('btnLogin');
+    const btnLogout = document.getElementById('btnLogout');
+    if (state.adminToken) {
+        if (btnLogin) btnLogin.style.display = 'none';
+        if (btnLogout) btnLogout.style.display = '';
+    } else {
+        if (btnLogin) btnLogin.style.display = '';
+        if (btnLogout) btnLogout.style.display = 'none';
+    }
+}
+
+function showLogin() {
+    document.getElementById('loginOverlay').classList.add('visible');
+    document.getElementById('loginError').textContent = '';
+}
+
+function closeLogin() {
+    document.getElementById('loginOverlay').classList.remove('visible');
+}
+
+async function submitLogin(e) {
+    e.preventDefault();
+    const user = document.getElementById('loginUser').value.trim();
+    const pass = document.getElementById('loginPass').value;
+    const errEl = document.getElementById('loginError');
+
+    const resp = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: user, password: pass }),
+    });
+    const data = await resp.json().catch(() => ({}));
+
+    if (data.ok && data.token) {
+        state.adminToken = data.token;
+        localStorage.setItem('stockreport_admin', data.token);
+        updateAuthUI();
+        closeLogin();
+        document.getElementById('loginForm').reset();
+        toast('Đăng nhập thành công', 'success');
+    } else {
+        errEl.textContent = data.error || 'Đăng nhập thất bại';
+    }
+    return false;
+}
+
+function logout() {
+    state.adminToken = null;
+    localStorage.removeItem('stockreport_admin');
+    updateAuthUI();
+    toast('Đã đăng xuất', 'info');
 }
 
 // ── WebSocket ──────────────────────────────────────────────────────────────

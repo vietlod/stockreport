@@ -95,6 +95,12 @@ body {
     filter: drop-shadow(0 0 8px rgba(99, 102, 241, 0.4));
 }
 
+.header-right {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
 .header-stats {
     display: flex;
     gap: 12px;
@@ -557,7 +563,22 @@ input::placeholder,
 
 .btn-accent:hover {
     background: rgba(6, 182, 212, 0.2);
-    border-color: rgba(6, 182, 212, 0.4);
+}
+
+.btn-sm {
+    padding: 6px 14px;
+    font-size: 0.85rem;
+}
+
+.btn-outline {
+    background: transparent;
+    border: 1px solid var(--border-light);
+    color: var(--text-dim);
+}
+
+.btn-outline:hover {
+    border-color: var(--accent);
+    color: var(--accent-light);
 }
 
 /* ── Progress ─────────────────────────────────────────────── */
@@ -1188,6 +1209,75 @@ input::placeholder,
     .data-table {
         min-width: 480px;
     }
+}
+
+/* ── Login Modal ──────────────────────────────────────────── */
+.login-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.7);
+    z-index: 1000;
+    align-items: center;
+    justify-content: center;
+    backdrop-filter: blur(4px);
+}
+
+.login-overlay.visible {
+    display: flex;
+}
+
+.login-modal {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 28px;
+    min-width: 320px;
+    box-shadow: var(--shadow);
+}
+
+.login-modal h2 {
+    font-size: 1.2rem;
+    margin-bottom: 6px;
+}
+
+.login-hint {
+    font-size: 0.85rem;
+    color: var(--text-dim);
+    margin-bottom: 20px;
+}
+
+.login-modal input {
+    width: 100%;
+    padding: 12px 14px;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text);
+    font-size: 0.95rem;
+    margin-bottom: 12px;
+}
+
+.login-modal input:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+.login-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 16px;
+}
+
+.login-actions .btn {
+    flex: 1;
+}
+
+.login-error {
+    color: var(--red);
+    font-size: 0.85rem;
+    margin-top: 12px;
+    min-height: 20px;
 }
 
 /* ── Scrollbar ────────────────────────────────────────────── */

@@ -52,6 +52,12 @@ Nginx (VPS host) :443 SSL
 | 10 | **Stock PostgreSQL** | `stock-postgres` | `5432:5432` | PostgreSQL 15 (DB: stockmarket) |
 | 11 | **Stock API** | `stock-api` | `8001:8001` | Python + Vnstock |
 
+### Stock Report (CafeF CBTT - systemd, khong dung Docker)
+
+| # | Service | Port | Tech Stack |
+|---|---------|------|------------|
+| 12 | **Stock Report** | `8002:8002` | FastAPI + Uvicorn, Playwright |
+
 ---
 
 ## 3. Chi Tiet Tung Service
@@ -459,3 +465,40 @@ docker-compose -f docker-compose.production.yml build --no-cache frontend
 3. **Frontend** can `docs` container chay (upstream trong nginx.conf cho route `/docs`)
 4. **Network name** thuc te la `ecodata_econdata-network` (co prefix project name)
 5. **Port 3000:80** - nginx tren VPS proxy 443 -> 3000 (frontend container listen port 80)
+
+---
+
+## 11. Stock Report (stockreport.khoviet.com)
+
+**Thu muc:** `/opt/stockreport`
+**Port:** 8002 (tranh conflict: 8000=ecodata, 8001=stock-api)
+**URL:** https://stockreport.khoviet.com
+
+### Cau truc
+
+| Thuoc tinh | Gia tri |
+|-----------|---------|
+| Deploy | systemd (khong Docker) |
+| Service | `stockreport.service` |
+| Python | venv tai `.venv` |
+| SSL | Let's Encrypt (certbot) |
+| Nginx | `/etc/nginx/sites-available/stockreport.khoviet.com` |
+
+### Lenh thuong dung
+
+```bash
+# Restart
+systemctl restart stockreport
+
+# Xem logs
+journalctl -u stockreport -f
+
+# Deploy moi (pull code)
+cd /opt/stockreport && git pull origin dev && systemctl restart stockreport
+```
+
+### Deploy tu Windows (plink)
+
+```powershell
+.\docs\deployment\deploy-vps.ps1
+```
