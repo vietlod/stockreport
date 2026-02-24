@@ -106,7 +106,8 @@ def get_oauth_authorization_url() -> str:
     url, _ = flow.authorization_url(
         access_type="offline",
         prompt="consent",
-        include_granted_scopes="true",
+        # Không dùng include_granted_scopes — OAuth client dùng chung với app khác (pdf2vid/YouTube)
+        # gây lỗi "Scope has changed" khi token trả về nhiều scopes hơn yêu cầu
     )
     return url
 
