@@ -514,7 +514,7 @@ async function cleanupFiltered() {
     if (state.historyFilterICB) params.set('icb_code', state.historyFilterICB);
     if (state.historyFilterSync !== '') params.set('drive_synced', state.historyFilterSync);
 
-    const result = await api(`/api/history/cleanup?${params}`, { method: 'DELETE' });
+    const result = await api(`/api/history/cleanup?${params}`, { method: 'DELETE' }, true);
     if (!result) return;
 
     if (result.error) {
@@ -529,6 +529,16 @@ async function cleanupFiltered() {
     state.historyPage = 1;
     loadHistory();
     loadStats();
+}
+
+// ── Background Task State ──────────────────────────────────────────────────
+const bgTaskRunning = { scrape: false, drive: false, sheet: false };
+
+function updateActionButtons() {
+    const anyRunning = bgTaskRunning.scrape || bgTaskRunning.drive || bgTaskRunning.sheet;
+    document.getElementById('btnScrape').disabled = anyRunning;
+    document.getElementById('btnSyncDrive').disabled = anyRunning;
+    document.getElementById('btnSyncSheet').disabled = anyRunning;
 }
 
 // ── Scrape Job ─────────────────────────────────────────────────────────────
@@ -546,7 +556,8 @@ async function startScrape() {
         lastLoggedEntry = '';
         lastDownloadedForStats = -1;
         document.getElementById('progressCard').style.display = '';
-        document.getElementById('btnScrape').disabled = true;
+        bgTaskRunning.scrape = true;
+        updateActionButtons();
         document.getElementById('btnStop').disabled = false;
         document.getElementById('logStream').innerHTML = '';
         toast('Đã bắt đầu scraping...', 'info');
@@ -614,17 +625,18 @@ async function syncDrive() {
         startOAuthFlow('drive');
         return;
     }
-    btn.disabled = true;
+    bgTaskRunning.drive = true;
+    updateActionButtons();
     toast('Đang khởi tạo sync Drive...', 'info');
     const resp = await api('/api/gdrive/sync', { method: 'POST' }, true);
-    if (!resp) { btn.disabled = false; return; }
+    if (!resp) { bgTaskRunning.drive = false; updateActionButtons(); return; }
     if (resp.status === 'started') {
         toast('☁ Sync Drive đang chạy nền. Có thể đóng tab.', 'info');
     } else if ((resp.error || '').includes('Chưa có Google OAuth token')) {
-        btn.disabled = false;
+        bgTaskRunning.drive = false; updateActionButtons();
         startOAuthFlow('drive');
     } else {
-        btn.disabled = false;
+        bgTaskRunning.drive = false; updateActionButtons();
         toast(resp.error || 'Lỗi upload', 'error');
     }
 }
@@ -647,14 +659,15 @@ async function syncSheet() {
         startOAuthFlow('sheet');
         return;
     }
-    btn.disabled = true;
+    bgTaskRunning.sheet = true;
+    updateActionButtons();
     toast('Đang khởi tạo sync Sheet...', 'info');
     const resp = await api('/api/gsheet/sync', { method: 'POST' }, true);
-    if (!resp) { btn.disabled = false; return; }
+    if (!resp) { bgTaskRunning.sheet = false; updateActionButtons(); return; }
     if (resp.status === 'started') {
         toast('📊 Sync Sheet đang chạy nền. Có thể đóng tab.', 'info');
     } else {
-        btn.disabled = false;
+        bgTaskRunning.sheet = false; updateActionButtons();
         toast(resp.error || 'Lỗi cập nhật', 'error');
     }
 }
@@ -997,7 +1010,8 @@ function handleProgress(data) {
 
     // Completed → re-enable buttons, reload data
     if (data.status === 'completed' || data.status === 'stopped' || data.status === 'error') {
-        document.getElementById('btnScrape').disabled = false;
+        bgTaskRunning.scrape = false;
+        updateActionButtons();
         document.getElementById('btnStop').disabled = true;
         document.getElementById('progressBar').style.width = '100%';
         stopPolling();
@@ -1114,9 +1128,9 @@ function handleSyncProgress(data) {
             bar.style.width = '100%';
             detail.innerHTML = `<span class="sync-stats">↑${u} uploaded | ⏭${s} skipped | ✖${e} errors</span>`;
             toast(`✅ Drive sync hoàn tất: ${u} uploaded, ${s} skipped, ${e} errors`, u > 0 ? 'success' : 'info');
-            // Re-enable button
-            const btnDrive = document.getElementById('btnSyncDrive');
-            if (btnDrive) btnDrive.disabled = false;
+            // Re-enable buttons
+            bgTaskRunning.drive = false;
+            updateActionButtons();
             // Auto-hide after 10s
             syncAutoHideTimers.drive = setTimeout(() => {
                 row.style.display = 'none';
@@ -1140,9 +1154,9 @@ function handleSyncProgress(data) {
             } else {
                 toast(`❌ Drive sync lỗi: ${err}`, 'error');
             }
-            // Re-enable button
-            const btnDrive = document.getElementById('btnSyncDrive');
-            if (btnDrive) btnDrive.disabled = false;
+            // Re-enable buttons
+            bgTaskRunning.drive = false;
+            updateActionButtons();
         }
     }
 
@@ -1195,9 +1209,9 @@ function handleSyncProgress(data) {
                     card.style.display = 'none';
                 }
             }, 10000);
-            // Re-enable button
-            const btnSheet = document.getElementById('btnSyncSheet');
-            if (btnSheet) btnSheet.disabled = false;
+            // Re-enable buttons
+            bgTaskRunning.sheet = false;
+            updateActionButtons();
 
         } else if (st === 'error') {
             const err = data.error || 'Unknown';
@@ -1213,9 +1227,9 @@ function handleSyncProgress(data) {
             } else {
                 toast(`❌ Sheet sync lỗi: ${err}`, 'error');
             }
-            // Re-enable button
-            const btnSheet = document.getElementById('btnSyncSheet');
-            if (btnSheet) btnSheet.disabled = false;
+            // Re-enable buttons
+            bgTaskRunning.sheet = false;
+            updateActionButtons();
         }
     }
 

@@ -23,6 +23,11 @@ Tất cả thay đổi đáng chú ý của dự án được ghi nhận tại �
 - **Bảng Lịch sử**: TICKER hiển thị link xanh đến file trên Google Drive (khi đã sync)
 - **Google Sheet CAFEF**: TICKER dùng `=HYPERLINK()` formula link đến Drive
 
+#### Mutual Button Disable (`app.js`)
+- **Khoá chéo 3 nút**: Bắt đầu tải / Sync Drive / Sync Sheet — khi bất kỳ task nào chạy nền, cả 3 nút đều bị vô hiệu hoá
+- State tracker `bgTaskRunning { scrape, drive, sheet }` + helper `updateActionButtons()` quản lý tập trung
+- Enable lại chỉ khi **tất cả** task kết thúc (completed/stopped/error)
+
 ### 🔧 Cải tiến
 
 #### Google Sheet CAFEF (`google_sync.py`)

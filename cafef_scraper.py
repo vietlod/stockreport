@@ -928,9 +928,12 @@ class CafeFScraper:
                 page.wait_for_timeout(5000)
 
             # ── Phase 3: Chụp screenshot để debug ───────────────────────
-            screenshot_path = PDF_DIR / "_debug_page.png"
-            page.screenshot(path=str(screenshot_path), full_page=True)
-            log.info(f"📸 Screenshot saved: {screenshot_path}")
+            try:
+                screenshot_path = PDF_DIR / "_debug_page.png"
+                page.screenshot(path=str(screenshot_path), full_page=False, timeout=10000)
+                log.info(f"📸 Screenshot saved: {screenshot_path}")
+            except Exception as e:
+                log.warning(f"📸 Screenshot skipped: {e}")
 
             # ── Phase 4: Scrape theo chế độ ─────────────────────────────
             if len(ticker_list) > 1 and cbtt_info.get("exists"):

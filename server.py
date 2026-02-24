@@ -481,6 +481,12 @@ def get_db():
         return None
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
+    # Auto-migration: đảm bảo cột mới tồn tại
+    for col, col_type in [("drive_synced", "INTEGER DEFAULT 0"), ("drive_file_id", "TEXT")]:
+        try:
+            conn.execute(f"ALTER TABLE downloads ADD COLUMN {col} {col_type}")
+        except Exception:
+            pass  # column already exists
     return conn
 
 
