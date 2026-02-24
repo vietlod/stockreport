@@ -419,6 +419,10 @@ class CafeFScraper:
         self.filtered_time = 0    # Bỏ qua vì ngoài khoảng thời gian
         self.history = DownloadHistory(PDF_DIR)
         self.on_download_callback = None  # Optional: (dest: Path) -> None, gọi sau mỗi download thành công
+        # Multi-ticker progress tracking
+        self.current_ticker = ""   # Ticker đang scrape
+        self.ticker_index = 0      # Thứ tự ticker hiện tại (1-based)
+        self.total_tickers = 0     # Tổng số ticker cần scrape
 
     def _on_response(self, response):
         """Callback bắt network responses để tìm API endpoint."""
@@ -704,8 +708,87 @@ class CafeFScraper:
             else:
                 self.failed += 1
 
+    def _search_ticker_on_cafef(self, page, ticker: str) -> dict:
+        """Dùng CafeF IformationDisclosure search để filter theo 1 mã CK.
+
+        Returns cbtt_info dict sau khi search.
+        """
+        try:
+            page.evaluate(f"""
+                IformationDisclosure.refInputAC.value = "{ticker}";
+                IformationDisclosure.handleFindDisclosure();
+            """)
+            log.info(f"  ✏ Đã filter theo mã CK: {ticker}")
+            page.wait_for_timeout(3000)
+            cbtt_info = self._wait_for_cbtt_module(page, timeout_ms=5000)
+            if cbtt_info.get("exists"):
+                log.info(f"  📊 Kết quả cho {ticker}: {cbtt_info['totalPage']} trang")
+            else:
+                log.warning(f"  ⚠ Không có kết quả CBTT cho {ticker}")
+            return cbtt_info
+        except Exception as e:
+            log.warning(f"  ⚠ Lỗi khi search mã CK {ticker}: {e}")
+            return {"exists": False}
+
+    def _reset_cafef_search(self, page):
+        """Reset search field về rỗng để chuẩn bị search ticker tiếp theo."""
+        try:
+            page.evaluate("""
+                IformationDisclosure.refInputAC.value = "";
+                IformationDisclosure.handleFindDisclosure();
+            """)
+            page.wait_for_timeout(2000)
+        except Exception as e:
+            log.warning(f"  ⚠ Lỗi khi reset search: {e}")
+
+    def _scrape_pages(self, page, context, actual_max_pages: int):
+        """Scrape entries từ các trang CBTT hiện tại.
+
+        Dùng chung cho cả single-ticker và multi-ticker.
+        """
+        for page_num in range(1, actual_max_pages + 1):
+            log.info(f"\n{'─'*60}")
+            ticker_label = f"[{self.current_ticker}] " if self.current_ticker else ""
+            log.info(f"📃 {ticker_label}Đang xử lý trang {page_num}/{actual_max_pages}")
+
+            entries = self._extract_entries_from_page(page)
+            log.info(f"   Tìm thấy {len(entries)} CBTT entries trên trang {page_num}")
+
+            if not entries:
+                log.warning(f"   Không tìm thấy entries trên trang {page_num}. Dừng.")
+                break
+
+            self.entries.extend(entries)
+
+            # Xử lý từng entry
+            # Mở tab mới cho detail pages để không mất context trang chính
+            detail_page = context.new_page()
+
+            for idx, entry in enumerate(entries):
+                self._process_entry(detail_page, entry, idx + (page_num - 1) * 20)
+
+            detail_page.close()
+
+            # Pagination: chuyển trang bằng IformationDisclosure JS
+            if page_num < actual_max_pages:
+                # Adaptive rate limiting: tăng delay mỗi 20 trang
+                delay = PAGE_DELAY + (page_num // 20) * 0.5
+                log.info(f"   ⏱ Đợi {delay:.1f}s trước trang tiếp...")
+                time.sleep(delay)
+
+                next_success = self._go_to_next_page(page, page_num)
+                if not next_success:
+                    log.info("   Không còn trang tiếp theo. Dừng.")
+                    break
+
     def run(self):
-        """Chạy scraper chính."""
+        """Chạy scraper chính.
+
+        Hỗ trợ 3 chế độ:
+        - Không có STOCK_CODE → scrape tất cả (behavior cũ)
+        - 1 mã CK → search CafeF + scrape
+        - Nhiều mã CK (nhóm ngành/sàn/chỉ số) → lần lượt search từng mã
+        """
         log.info("=" * 60)
         log.info("CafeF CBTT PDF Scraper")
         log.info("=" * 60)
@@ -716,6 +799,12 @@ class CafeFScraper:
         log.info(f"  HEADLESS      : {HEADLESS}")
         log.info(f"  PAGE_DELAY    : {PAGE_DELAY}s")
         log.info(f"  DOWNLOAD_DELAY: {DOWNLOAD_DELAY}s")
+
+        # Parse danh sách tickers
+        ticker_list = [s.strip().upper() for s in STOCK_CODE.split(",") if s.strip()] if STOCK_CODE else []
+        self.total_tickers = len(ticker_list)
+        if ticker_list:
+            log.info(f"  TICKERS       : {len(ticker_list)} mã — {', '.join(ticker_list[:10])}{'...' if len(ticker_list) > 10 else ''}")
         log.info("")
 
         PDF_DIR.mkdir(parents=True, exist_ok=True)
@@ -749,85 +838,78 @@ class CafeFScraper:
             # ── Phase 2: Đợi IformationDisclosure JS module sẵn sàng ───
             log.info("⏳ Đợi module CBTT (IformationDisclosure) khởi tạo...")
             cbtt_info = self._wait_for_cbtt_module(page, timeout_ms=15000)
-            
-            if cbtt_info.get("exists"):
-                total_pages = cbtt_info["totalPage"]
-                page_size = cbtt_info["pageSize"]
-                # MAX_PAGES=0 → fetch all
-                if MAX_PAGES <= 0:
-                    actual_max_pages = total_pages
-                else:
-                    actual_max_pages = min(MAX_PAGES, total_pages)
-                log.info(f"  ✅ Module CBTT sẵn sàng:")
-                log.info(f"     Tổng số trang : {total_pages}")
-                log.info(f"     Entries/trang  : {page_size}")
-                log.info(f"     Sẽ scrape      : {actual_max_pages} trang")
-            else:
-                log.warning("  ⚠ Module CBTT không tìm thấy, thử scrape trực tiếp...")
-                actual_max_pages = MAX_PAGES if MAX_PAGES > 0 else 10
-                page.wait_for_timeout(5000)
 
-            # Nếu có 1 mã CK → dùng autocomplete search của CBTT (nhiều mã thì filter ở _process_entry)
-            single_stock = STOCK_CODE.split(",")[0].strip() if STOCK_CODE else ""
-            if single_stock and "," not in STOCK_CODE and cbtt_info.get("exists"):
-                try:
-                    page.evaluate(f"""
-                        IformationDisclosure.refInputAC.value = "{single_stock}";
-                        IformationDisclosure.handleFindDisclosure();
-                    """)
-                    log.info(f"  ✏ Đã filter theo mã CK: {single_stock}")
-                    page.wait_for_timeout(3000)
-                    cbtt_info = self._wait_for_cbtt_module(page, timeout_ms=5000)
-                    if cbtt_info.get("exists"):
-                        if MAX_PAGES <= 0:
-                            actual_max_pages = cbtt_info["totalPage"]
-                        else:
-                            actual_max_pages = min(MAX_PAGES, cbtt_info["totalPage"])
-                        log.info(f"  📊 Sau filter: {cbtt_info['totalPage']} trang")
-                except Exception as e:
-                    log.warning(f"  ⚠ Lỗi khi filter mã CK: {e}")
+            if not cbtt_info.get("exists"):
+                log.warning("  ⚠ Module CBTT không tìm thấy, thử scrape trực tiếp...")
+                page.wait_for_timeout(5000)
 
             # ── Phase 3: Chụp screenshot để debug ───────────────────────
             screenshot_path = PDF_DIR / "_debug_page.png"
             page.screenshot(path=str(screenshot_path), full_page=True)
             log.info(f"📸 Screenshot saved: {screenshot_path}")
 
-            # ── Phase 4: Extract entries và navigate pages ──────────────
-            for page_num in range(1, actual_max_pages + 1):
-                log.info(f"\n{'─'*60}")
-                log.info(f"📃 Đang xử lý trang {page_num}/{actual_max_pages}")
+            # ── Phase 4: Scrape theo chế độ ─────────────────────────────
+            if len(ticker_list) > 1 and cbtt_info.get("exists"):
+                # ── Multi-ticker: lần lượt search từng mã ───────────────
+                log.info(f"\n🔄 Multi-ticker mode: {len(ticker_list)} mã CK")
+                for t_idx, ticker in enumerate(ticker_list, start=1):
+                    self.current_ticker = ticker
+                    self.ticker_index = t_idx
+                    log.info(f"\n{'='*60}")
+                    log.info(f"🏷 [{t_idx}/{len(ticker_list)}] Đang xử lý: {ticker}")
 
-                entries = self._extract_entries_from_page(page)
-                log.info(f"   Tìm thấy {len(entries)} CBTT entries trên trang {page_num}")
+                    # Search ticker trên CafeF
+                    t_cbtt = self._search_ticker_on_cafef(page, ticker)
+                    if not t_cbtt.get("exists") or t_cbtt.get("totalPage", 0) == 0:
+                        log.info(f"  ⏭ Bỏ qua {ticker}: không có dữ liệu CBTT")
+                        continue
 
-                if not entries:
-                    log.warning(f"   Không tìm thấy entries trên trang {page_num}. Dừng.")
-                    break
+                    t_total = t_cbtt["totalPage"]
+                    if MAX_PAGES <= 0:
+                        t_max = t_total
+                    else:
+                        t_max = min(MAX_PAGES, t_total)
 
-                self.entries.extend(entries)
+                    self._scrape_pages(page, context, t_max)
 
-                # Xử lý từng entry
-                # Mở tab mới cho detail pages để không mất context trang chính
-                detail_page = context.new_page()
+                    # Reset search cho ticker tiếp theo
+                    if t_idx < len(ticker_list):
+                        self._reset_cafef_search(page)
+                        time.sleep(PAGE_DELAY)
 
-                for idx, entry in enumerate(entries):
-                    self._process_entry(detail_page, entry, idx + (page_num - 1) * 20)
+            elif len(ticker_list) == 1 and cbtt_info.get("exists"):
+                # ── Single-ticker: search 1 mã ──────────────────────────
+                self.current_ticker = ticker_list[0]
+                self.ticker_index = 1
+                t_cbtt = self._search_ticker_on_cafef(page, ticker_list[0])
 
-                detail_page.close()
+                if t_cbtt.get("exists"):
+                    t_total = t_cbtt["totalPage"]
+                    if MAX_PAGES <= 0:
+                        actual_max_pages = t_total
+                    else:
+                        actual_max_pages = min(MAX_PAGES, t_total)
+                else:
+                    actual_max_pages = MAX_PAGES if MAX_PAGES > 0 else 10
 
-                # Pagination: chuyển trang bằng IformationDisclosure JS
-                if page_num < actual_max_pages:
-                    # Adaptive rate limiting: tăng delay mỗi 20 trang
-                    delay = PAGE_DELAY + (page_num // 20) * 0.5
-                    log.info(f"   ⏱ Đợi {delay:.1f}s trước trang tiếp...")
-                    time.sleep(delay)
+                self._scrape_pages(page, context, actual_max_pages)
 
-                    next_success = self._go_to_next_page(page, page_num)
-                    if not next_success:
-                        log.info("   Không còn trang tiếp theo. Dừng.")
-                        break
+            else:
+                # ── No filter: scrape tất cả ────────────────────────────
+                if cbtt_info.get("exists"):
+                    total_pages = cbtt_info["totalPage"]
+                    if MAX_PAGES <= 0:
+                        actual_max_pages = total_pages
+                    else:
+                        actual_max_pages = min(MAX_PAGES, total_pages)
+                    log.info(f"  ✅ Module CBTT sẵn sàng: {total_pages} trang")
+                else:
+                    actual_max_pages = MAX_PAGES if MAX_PAGES > 0 else 10
+
+                self._scrape_pages(page, context, actual_max_pages)
 
             # ── Kết thúc ────────────────────────────────────────────────
+            self.current_ticker = ""
             browser.close()
 
         # ── Tổng kết ────────────────────────────────────────────────────
@@ -837,6 +919,8 @@ class CafeFScraper:
         log.info(f"   PDF mới tải           : {self.downloaded}")
         log.info(f"   Đã có (bỏ qua)        : {self.skipped}")
         log.info(f"   Thất bại             : {self.failed}")
+        if self.total_tickers > 1:
+            log.info(f"   Tickers đã xử lý     : {self.total_tickers}")
         log.info(f"   Tổng trong DB history : {self.history.count}")
         log.info(f"   Thư mục PDF          : {PDF_DIR.absolute()}")
         log.info(f"{'='*60}")
@@ -859,6 +943,7 @@ class CafeFScraper:
             "downloaded": self.downloaded,
             "skipped": self.skipped,
             "failed": self.failed,
+            "total_tickers": self.total_tickers,
             "db_stats": stats,
         }
         report_path = PDF_DIR / "_scraper_report.json"

@@ -188,6 +188,10 @@ class ScrapeJob:
                     raise InterruptedError("Stopped by user")
                 stock = entry.get("stock_code", "")
                 self.progress["current_entry"] = f"{stock} - {entry.get('date', '')}"
+                # Multi-ticker tracking
+                self.progress["current_ticker"] = scraper.current_ticker
+                self.progress["ticker_index"] = scraper.ticker_index
+                self.progress["total_tickers"] = scraper.total_tickers
                 self._broadcast_sync({"type": "progress", **self.progress})
                 original_process(page, entry, index)
                 self.progress["downloaded"] = scraper.downloaded
@@ -254,6 +258,121 @@ class ScrapeJob:
 
 scrape_job = ScrapeJob()
 
+
+# ── Sync Job State (Google Drive / Sheet) ───────────────────────────────────
+
+class SyncJob:
+    """Background sync job — chạy trong daemon thread, không phụ thuộc browser."""
+
+    def __init__(self):
+        self.running = False
+        self.sync_type = ""  # "drive" | "sheet"
+        self.progress = {}
+        self.thread = None
+        self.loop = None
+
+    def start_drive(self, loop):
+        if self.running:
+            return False
+        self.running = True
+        self.sync_type = "drive"
+        self.loop = loop
+        self.progress = {
+            "sync_type": "drive",
+            "status": "running",
+            "uploaded": 0,
+            "skipped": 0,
+            "errors": 0,
+            "total": 0,
+            "current_file": "",
+            "started_at": datetime.now().isoformat(),
+        }
+        self.thread = threading.Thread(
+            target=self._run_drive, daemon=True
+        )
+        self.thread.start()
+        return True
+
+    def start_sheet(self, loop):
+        if self.running:
+            return False
+        self.running = True
+        self.sync_type = "sheet"
+        self.loop = loop
+        self.progress = {
+            "sync_type": "sheet",
+            "status": "running",
+            "rows": 0,
+            "started_at": datetime.now().isoformat(),
+        }
+        self.thread = threading.Thread(
+            target=self._run_sheet, daemon=True
+        )
+        self.thread.start()
+        return True
+
+    def _broadcast_sync(self, data: dict):
+        if self.loop:
+            asyncio.run_coroutine_threadsafe(
+                ws_manager.broadcast(data), self.loop
+            )
+
+    def _run_drive(self):
+        try:
+            from google_sync import GoogleDriveSync
+            sync = GoogleDriveSync()
+
+            def on_progress(current, total, filename, stats):
+                self.progress.update({
+                    "uploaded": stats["uploaded"],
+                    "skipped": stats["skipped"],
+                    "errors": stats["errors"],
+                    "total": total,
+                    "current_file": filename,
+                    "current_index": current,
+                })
+                self._broadcast_sync({"type": "sync_progress", **self.progress})
+
+            stats = sync.upload_all(progress_callback=on_progress)
+            self.progress.update({
+                "status": "completed",
+                "uploaded": stats["uploaded"],
+                "skipped": stats["skipped"],
+                "errors": stats["errors"],
+                "total": stats["total"],
+                "completed_at": datetime.now().isoformat(),
+            })
+        except Exception as e:
+            self.progress["status"] = "error"
+            self.progress["error"] = str(e)
+            log.error(f"Drive sync error: {e}", exc_info=True)
+        finally:
+            self.running = False
+            self._broadcast_sync({"type": "sync_progress", **self.progress})
+
+    def _run_sheet(self):
+        try:
+            from google_sync import GoogleSheetSync
+            sync = GoogleSheetSync()
+            result = sync.sync()
+            self.progress.update({
+                "status": "completed",
+                "rows": result.get("rows", 0),
+                "skipped": result.get("skipped", False),
+                "sheet_id": result.get("sheet_id", ""),
+                "completed_at": datetime.now().isoformat(),
+            })
+        except Exception as e:
+            self.progress["status"] = "error"
+            self.progress["error"] = str(e)
+            log.error(f"Sheet sync error: {e}", exc_info=True)
+        finally:
+            self.running = False
+            self._broadcast_sync({"type": "sync_progress", **self.progress})
+
+
+sync_job = SyncJob()
+
 # ── Helper: Query SQLite ────────────────────────────────────────────────────
 def get_db():
     db_path = PDF_DIR / "_download_history.db"
@@ -290,7 +409,10 @@ def get_stats_summary_sync() -> dict:
 @app.on_event("startup")
 async def startup():
     stock_registry.load()
-    log.info("🚀 Server started, StockRegistry loaded")
+    # Start cleanup scheduler (auto-delete expired files every 24h)
+    from cleanup import start_cleanup_scheduler
+    start_cleanup_scheduler(interval_hours=24)
+    log.info("🚀 Server started, StockRegistry loaded, Cleanup scheduler started")
 
 
 @app.get("/api/stock-data")
@@ -494,6 +616,45 @@ async def auth_login(data: dict):
     return JSONResponse(status_code=401, content={"ok": False, "error": "Tên đăng nhập hoặc mật khẩu không đúng"})
 
 
+# ── Settings & Cleanup ──────────────────────────────────────────────────────
+
+@app.get("/api/settings")
+async def get_settings():
+    """Lấy cài đặt hiện tại + danh sách retention options."""
+    from cleanup import load_settings, RETENTION_OPTIONS
+    settings = load_settings()
+    return {
+        **settings,
+        "retention_options": {
+            k: v["label"] for k, v in RETENTION_OPTIONS.items()
+        },
+    }
+
+
+@app.post("/api/settings")
+async def update_settings(data: dict, _: bool = Depends(require_admin)):
+    """Cập nhật cài đặt. Body: {retention: '1q'}"""
+    from cleanup import save_settings
+    try:
+        saved = save_settings(data)
+        return {"status": "ok", **saved}
+    except Exception as e:
+        log.error(f"Save settings error: {e}")
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.post("/api/cleanup/run")
+async def run_cleanup(_: bool = Depends(require_admin)):
+    """Chạy cleanup thủ công. Xóa files hết hạn retention ngay lập tức."""
+    from cleanup import cleanup_expired_files
+    try:
+        result = cleanup_expired_files()
+        return {"status": "ok", **result}
+    except Exception as e:
+        log.error(f"Manual cleanup error: {e}", exc_info=True)
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
 # ── Google Integration ──────────────────────────────────────────────────────
 
 def _check_google_drive_config():
@@ -515,13 +676,21 @@ def _check_google_sheet_config():
 
 @app.post("/api/gdrive/sync")
 async def gdrive_sync(_: bool = Depends(require_admin)):
-    """Upload tất cả PDF lên Google Drive. Yêu cầu đăng nhập admin."""
+    """Upload tất cả PDF lên Google Drive (chạy nền).
+
+    Trả response ngay, sync tiếp tục chạy trong background thread.
+    Tiến trình broadcast qua WebSocket (type: sync_progress).
+    """
     try:
         _check_google_drive_config()
-        from google_sync import GoogleDriveSync
-        sync = GoogleDriveSync()
-        stats = sync.upload_all()
-        return {"status": "ok", **stats}
+        loop = asyncio.get_event_loop()
+        started = sync_job.start_drive(loop)
+        if not started:
+            return JSONResponse(
+                status_code=409,
+                content={"error": f"Sync đang chạy ({sync_job.sync_type}). Vui lòng đợi hoàn tất."}
+            )
+        return {"status": "started", "sync_type": "drive"}
     except ValueError as e:
         return JSONResponse(status_code=400, content={"error": str(e)})
     except FileNotFoundError as e:
@@ -533,13 +702,21 @@ async def gdrive_sync(_: bool = Depends(require_admin)):
 
 @app.post("/api/gsheet/sync")
 async def gsheet_sync(_: bool = Depends(require_admin)):
-    """Sync metadata lên Google Sheets. Yêu cầu đăng nhập admin."""
+    """Sync metadata lên Google Sheets (chạy nền).
+
+    Trả response ngay, sync tiếp tục chạy trong background thread.
+    Incremental: skip nếu data không thay đổi (hash-based).
+    """
     try:
         _check_google_sheet_config()
-        from google_sync import GoogleSheetSync
-        sync = GoogleSheetSync()
-        result = sync.sync()
-        return {"status": "ok", **result}
+        loop = asyncio.get_event_loop()
+        started = sync_job.start_sheet(loop)
+        if not started:
+            return JSONResponse(
+                status_code=409,
+                content={"error": f"Sync đang chạy ({sync_job.sync_type}). Vui lòng đợi hoàn tất."}
+            )
+        return {"status": "started", "sync_type": "sheet"}
     except ValueError as e:
         return JSONResponse(status_code=400, content={"error": str(e)})
     except FileNotFoundError as e:
@@ -547,6 +724,16 @@ async def gsheet_sync(_: bool = Depends(require_admin)):
     except Exception as e:
         log.error(f"Google Sheet sync error: {e}", exc_info=True)
         return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.get("/api/sync/status")
+async def sync_status():
+    """Trạng thái sync hiện tại (Drive hoặc Sheet)."""
+    return {
+        "running": sync_job.running,
+        "sync_type": sync_job.sync_type,
+        **sync_job.progress,
+    }
 
 
 # ── WebSocket ───────────────────────────────────────────────────────────────

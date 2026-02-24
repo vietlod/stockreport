@@ -2,6 +2,41 @@
 
 Tất cả thay đổi đáng chú ý của dự án được ghi nhận tại đây.
 
+## [1.1.0] - 2026-02-24
+
+### 🚀 Tính năng mới
+
+#### Auto-Delete Files (`cleanup.py`) [NEW]
+- **Retention period** cấu hình: 1 tuần / 1 tháng / 1 quý (mặc định) / 1 năm / Không xóa
+- **Background scheduler**: daemon thread kiểm tra + xóa files hết hạn mỗi 24h
+- Xóa dựa trên `downloaded_at` trong DB → xóa file vật lý + record DB
+- Tự dọn thư mục ICB rỗng sau khi xóa
+- Settings lưu vào `_settings.json` trong thư mục PDF
+- API endpoints: `GET/POST /api/settings`, `POST /api/cleanup/run`
+
+#### Background Sync (`server.py`)
+- **SyncJob class**: chạy Drive/Sheet sync trong daemon thread, độc lập browser
+- Endpoint trả response ngay (`{"status": "started"}`), sync tiếp tục chạy nền
+- Broadcast tiến trình qua WebSocket (`type: sync_progress`)
+- `GET /api/sync/status` — poll trạng thái sync
+
+### 🔧 Cải tiến
+
+#### Google Drive Sync (`google_sync.py`)
+- **Batch file listing**: `_list_existing_files_recursive()` thay N+1 per-file queries
+- **File size check**: detect file upload dở/corrupt → auto delete + re-upload
+
+#### Google Sheet Sync (`google_sync.py`)
+- **Hash-based incremental**: MD5 hash data → lưu vào G1 → skip nếu data không đổi
+
+#### UI Updates
+- **Login screen**: glassmorphism, fade-in animation, purple accents
+- **Header**: user avatar + dropdown menu (thay nút Logout)
+- **Settings modal**: glassmorphism overlay, slide-up animation
+- **WebSocket sync progress**: live toast notifications cho Drive upload + Sheet sync
+
+---
+
 ## [1.0.0] - 2026-02-24
 
 ### 🚀 Tính năng mới

@@ -21,6 +21,7 @@ Crawl/
 ├── cafef_scraper.py       # Scraper chính (Playwright)
 ├── stock_data.py          # StockRegistry — lookup ticker metadata
 ├── google_sync.py         # Google Drive + Sheets sync (OAuth2)
+├── cleanup.py             # Auto-delete files theo retention period
 ├── server.py              # FastAPI web server
 ├── .env                   # Cấu hình (xem bên dưới)
 ├── requirements.txt       # Python dependencies
@@ -92,7 +93,8 @@ Giao diện cho phép:
 - **Lọc** theo mã CK, sàn, ngành ICB, chỉ số, khoảng thời gian
 - **Scrape** với progress realtime qua WebSocket
 - **Thống kê** download theo sàn/ngành/chỉ số
-- **Sync** lên Google Drive và Google Sheets
+- **Sync** lên Google Drive và Google Sheets (chạy nền, không cần giữ tab)
+- **Cài đặt** tự động xóa files theo retention period
 
 ### CLI (chạy trực tiếp)
 
@@ -118,9 +120,13 @@ MAX_PAGES=0 python cafef_scraper.py
 | `POST` | `/api/scrape` | Bắt đầu job `{"stock_code":"ACB","max_pages":0}` |
 | `GET` | `/api/scrape/status` | Trạng thái job |
 | `POST` | `/api/scrape/stop` | Dừng job |
-| `POST` | `/api/gdrive/sync` | Upload PDF lên Google Drive |
-| `POST` | `/api/gsheet/sync` | Sync metadata lên Google Sheets |
-| `WS` | `/ws/progress` | WebSocket realtime events |
+| `POST` | `/api/gdrive/sync` | Upload PDF lên Google Drive (background) |
+| `POST` | `/api/gsheet/sync` | Sync metadata lên Google Sheets (background, incremental) |
+| `GET` | `/api/sync/status` | Trạng thái sync hiện tại |
+| `GET` | `/api/settings` | Lấy cài đặt + retention options |
+| `POST` | `/api/settings` | Cập nhật cài đặt `{"retention": "1q"}` |
+| `POST` | `/api/cleanup/run` | Chạy cleanup thủ công (xóa files hết hạn) |
+| `WS` | `/ws/progress` | WebSocket realtime events (scrape + sync progress) |
 
 ## Quy ước đặt tên file
 
@@ -152,6 +158,31 @@ SQLite tại `pdf/_download_history.db`:
 | exchange | TEXT | Sàn GD |
 | file_size | INTEGER | Dung lượng (bytes) |
 | downloaded_at | TEXT | Thời gian tải (ISO) |
+
+## Auto-Delete (Cleanup)
+
+Module `cleanup.py` tự động xóa files PDF hết hạn retention.
+
+| Retention | Thời gian | Mặc định |
+|-----------|-----------|----------|
+| `1w` | 7 ngày | |
+| `1m` | 30 ngày | |
+| `1q` | 90 ngày | ✅ |
+| `1y` | 365 ngày | |
+| `never` | Không xóa | |
+
+- **Settings**: lưu vào `pdf/_settings.json`
+- **Scheduler**: daemon thread chạy mỗi 24h (tự start cùng server)
+- **Cleanup thủ công**: nút "Dọn dẹp ngay" trong Settings modal hoặc `POST /api/cleanup/run`
+- **Logic**: query `downloaded_at` < cutoff → xóa file + DB record → xóa thư mục ICB rỗng
+
+## Background Sync
+
+Sync Drive/Sheet chạy trong background thread (daemon), **không phụ thuộc browser tab**:
+
+- **Drive**: batch listing thay vì N+1 queries, so sánh file size detect corrupt
+- **Sheet**: hash-based incremental — skip nếu data không thay đổi
+- **Tiến trình**: broadcast qua WebSocket (`type: sync_progress`)
 
 ## License
 

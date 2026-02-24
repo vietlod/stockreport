@@ -152,6 +152,63 @@ class GoogleDriveSync:
         results = service.files().list(q=query, fields="files(id)").execute()
         return len(results.get("files", [])) > 0
 
+    def _list_existing_files(self, service, parent_id: str) -> dict:
+        """Batch list ALL files trong folder → {name: {id, size}}.
+        
+        1 API call thay vì N calls cho N files.
+        """
+        result = {}
+        page_token = None
+        query = f"'{parent_id}' in parents and trashed=false and mimeType!='application/vnd.google-apps.folder'"
+        while True:
+            resp = service.files().list(
+                q=query,
+                fields="nextPageToken, files(id, name, size)",
+                pageSize=1000,
+                pageToken=page_token,
+            ).execute()
+            for f in resp.get("files", []):
+                result[f["name"]] = {
+                    "id": f["id"],
+                    "size": int(f.get("size", 0)),
+                }
+            page_token = resp.get("nextPageToken")
+            if not page_token:
+                break
+        return result
+
+    def _list_existing_files_recursive(self, service, root_folder_id: str) -> dict:
+        """List files trong root + tất cả subfolders.
+        
+        Returns: {relative_path: {id, size}} — ví dụ: {'ICB123/report.pdf': {...}}
+        """
+        result = {}
+        # Files trực tiếp trong root
+        for name, info in self._list_existing_files(service, root_folder_id).items():
+            result[name] = info
+
+        # Subfolders
+        page_token = None
+        query = f"'{root_folder_id}' in parents and trashed=false and mimeType='application/vnd.google-apps.folder'"
+        while True:
+            resp = service.files().list(
+                q=query,
+                fields="nextPageToken, files(id, name)",
+                pageSize=100,
+                pageToken=page_token,
+            ).execute()
+            for folder in resp.get("files", []):
+                folder_name = folder["name"]
+                self._folder_cache[folder_name] = folder["id"]
+                sub_files = self._list_existing_files(service, folder["id"])
+                for fname, finfo in sub_files.items():
+                    result[f"{folder_name}/{fname}"] = finfo
+            page_token = resp.get("nextPageToken")
+            if not page_token:
+                break
+
+        return result
+
     def upload_single(self, pdf_path: Path) -> bool:
         """Upload một file PDF lên Drive ngay sau khi tải xong.
         
@@ -186,9 +243,12 @@ class GoogleDriveSync:
             return False
 
     def upload_all(self, progress_callback=None) -> dict:
-        """Upload all PDFs from PDF_DIR to Google Drive.
-        
-        Returns: {"uploaded": int, "skipped": int, "errors": int}
+        """Upload PDFs từ PDF_DIR lên Google Drive.
+
+        Incremental: batch-list files trên Drive 1 lần, so sánh tên + size
+        → chỉ upload files mới hoặc bị corrupt (size khác).
+
+        Returns: {"uploaded": int, "skipped": int, "errors": int, "total": int}
         """
         if not DRIVE_FOLDER_ID:
             raise ValueError("GOOGLE_DRIVE_FOLDER_ID not configured in .env")
@@ -198,16 +258,35 @@ class GoogleDriveSync:
         service = self._service()
         stats = {"uploaded": 0, "skipped": 0, "errors": 0, "total": 0}
 
-        # Collect all PDFs
+        # Collect all local PDFs
         pdf_files = sorted(PDF_DIR.rglob("*.pdf"))
         stats["total"] = len(pdf_files)
-        log.info(f"📤 Uploading {len(pdf_files)} PDFs to Google Drive...")
+        log.info(f"📤 Scanning {len(pdf_files)} local PDFs...")
+
+        # ── Batch list existing remote files (1 + subfolder count API calls) ──
+        log.info("📋 Listing existing files on Drive (batch)...")
+        existing_remote = self._list_existing_files_recursive(service, DRIVE_FOLDER_ID)
+        log.info(f"   Found {len(existing_remote)} files already on Drive")
 
         for i, pdf_path in enumerate(pdf_files):
             try:
-                # Determine target folder (ICB subdirectory)
+                # Determine relative key and target folder
                 if pdf_path.parent != PDF_DIR:
                     icb_folder = pdf_path.parent.name
+                    relative_key = f"{icb_folder}/{pdf_path.name}"
+                else:
+                    relative_key = pdf_path.name
+
+                local_size = pdf_path.stat().st_size
+
+                # Skip if exists on Drive with matching size
+                remote_info = existing_remote.get(relative_key)
+                if remote_info and remote_info["size"] == local_size:
+                    stats["skipped"] += 1
+                    continue
+
+                # Need upload — get or create parent folder
+                if pdf_path.parent != PDF_DIR:
                     parent_id = self._get_or_create_folder(
                         service, icb_folder, DRIVE_FOLDER_ID
                     )
@@ -216,10 +295,14 @@ class GoogleDriveSync:
 
                 filename = pdf_path.name
 
-                # Skip if already exists
-                if self._file_exists(service, filename, parent_id):
-                    stats["skipped"] += 1
-                    continue
+                # Delete corrupt remote file if size mismatch
+                if remote_info and remote_info["size"] != local_size:
+                    try:
+                        service.files().delete(fileId=remote_info["id"]).execute()
+                        log.info(f"  🗑 Deleted corrupt remote: {relative_key} "
+                                 f"(remote={remote_info['size']}B, local={local_size}B)")
+                    except Exception:
+                        pass  # file may already be gone
 
                 # Upload
                 media = MediaFileUpload(
@@ -239,7 +322,7 @@ class GoogleDriveSync:
                 log.info(f"  ↑ [{i+1}/{len(pdf_files)}] {filename}")
 
                 if progress_callback:
-                    progress_callback(i + 1, len(pdf_files), filename)
+                    progress_callback(i + 1, len(pdf_files), filename, stats)
 
             except Exception as e:
                 stats["errors"] += 1
@@ -321,9 +404,12 @@ class GoogleSheetSync:
         return sheet_id
 
     def sync(self) -> dict:
-        """Sync all download records to Google Sheet.
-        
-        Returns: {"rows": int, "sheet_id": str}
+        """Sync download records lên Google Sheet.
+
+        Incremental: tính hash của data → so sánh với hash lưu trên Sheet (G1).
+        Nếu hash giống → skip (không có thay đổi).
+
+        Returns: {"rows": int, "sheet_id": str, "skipped": bool}
         """
         from stock_data import registry as stock_registry
         stock_registry.load()
@@ -334,7 +420,7 @@ class GoogleSheetSync:
         # Read download history from SQLite
         db_path = PDF_DIR / "_download_history.db"
         if not db_path.exists():
-            return {"rows": 0, "sheet_id": sheet_id, "error": "No download history"}
+            return {"rows": 0, "sheet_id": sheet_id, "error": "No download history", "skipped": False}
 
         conn = sqlite3.connect(str(db_path))
         conn.row_factory = sqlite3.Row
@@ -364,15 +450,34 @@ class GoogleSheetSync:
         # Sort by TICKER, TIME
         data.sort(key=lambda x: (x[0], x[1]))
 
-        # Clear existing data and write new
-        # First clear
+        # ── Hash-based change detection ──────────────────────────────
+        import hashlib
+        data_str = json.dumps(data, ensure_ascii=False, sort_keys=True)
+        new_hash = hashlib.md5(data_str.encode("utf-8")).hexdigest()
+
+        # Read stored hash from G1
+        try:
+            stored = service.spreadsheets().values().get(
+                spreadsheetId=sheet_id,
+                range="Sheet1!G1",
+            ).execute()
+            stored_hash = (stored.get("values", [[]])[0] or [""])[0]
+        except Exception:
+            stored_hash = ""
+
+        if stored_hash == new_hash:
+            log.info(f"⏭ Sheet sync skipped: data unchanged (hash={new_hash[:8]}...)")
+            return {"rows": len(data), "sheet_id": sheet_id, "skipped": True}
+
+        # ── Data changed → clear and rewrite ─────────────────────────
         service.spreadsheets().values().clear(
             spreadsheetId=sheet_id,
-            range="Sheet1!A2:F",
+            range="Sheet1!A2:G",
         ).execute()
 
-        # Write headers + data
-        all_values = [self.HEADERS] + data
+        # Write headers (A1:F1) + hash (G1) + data
+        header_row = self.HEADERS + [new_hash]
+        all_values = [header_row] + data
         service.spreadsheets().values().update(
             spreadsheetId=sheet_id,
             range="Sheet1!A1",
@@ -380,5 +485,6 @@ class GoogleSheetSync:
             body={"values": all_values},
         ).execute()
 
-        log.info(f"✅ Sheet sync done: {len(data)} rows → {self.SHEET_NAME}")
-        return {"rows": len(data), "sheet_id": sheet_id}
+        log.info(f"✅ Sheet sync done: {len(data)} rows → {self.SHEET_NAME} (hash={new_hash[:8]}...)")
+        return {"rows": len(data), "sheet_id": sheet_id, "skipped": False}
+

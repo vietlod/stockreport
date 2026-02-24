@@ -16,10 +16,26 @@ const state = {
     activeStatsTab: 'exchange',
     ws: null,
     adminToken: localStorage.getItem('stockreport_admin') || null,
+    username: localStorage.getItem('stockreport_user') || '',
 };
 
 // ── Init ───────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
+    // User menu toggle
+    const userAvatar = document.getElementById('userAvatar');
+    const userMenu = document.getElementById('userMenu');
+    if (userAvatar) {
+        userAvatar.addEventListener('click', (e) => {
+            e.stopPropagation();
+            userMenu.classList.toggle('open');
+        });
+    }
+    document.addEventListener('click', (e) => {
+        if (userMenu && !userMenu.contains(e.target)) {
+            userMenu.classList.remove('open');
+        }
+    });
+
     if (state.adminToken) {
         showApp();
     } else {
@@ -450,31 +466,99 @@ async function buildScrapeConfig() {
 
 // ── Google Sync ────────────────────────────────────────────────────────────
 async function syncDrive() {
-    toast('Đang upload lên Google Drive...', 'info');
+    toast('Đang khởi tạo sync Drive...', 'info');
     const resp = await api('/api/gdrive/sync', { method: 'POST' }, true);
     if (!resp) return;
-    if (resp.status === 'ok') {
-        toast(`Upload thành công: ${resp.uploaded} files`, 'success');
+    if (resp.status === 'started') {
+        toast('☁ Sync Drive đang chạy nền. Có thể đóng tab.', 'info');
     } else {
         toast(resp.error || 'Lỗi upload', 'error');
     }
 }
 
 async function syncSheet() {
-    toast('Đang cập nhật Google Sheet...', 'info');
+    toast('Đang khởi tạo sync Sheet...', 'info');
     const resp = await api('/api/gsheet/sync', { method: 'POST' }, true);
     if (!resp) return;
-    if (resp.status === 'ok') {
-        toast(`Đã cập nhật sheet: ${resp.rows} rows`, 'success');
+    if (resp.status === 'started') {
+        toast('📊 Sync Sheet đang chạy nền. Có thể đóng tab.', 'info');
     } else {
         toast(resp.error || 'Lỗi cập nhật', 'error');
     }
 }
 
+// ── Settings & Cleanup ─────────────────────────────────────────────────────
+
+function openSettings() {
+    // Close user dropdown
+    const userMenu = document.getElementById('userMenu');
+    if (userMenu) userMenu.classList.remove('open');
+
+    loadSettings();
+    document.getElementById('settingsModal').style.display = '';
+}
+
+function closeSettings() {
+    document.getElementById('settingsModal').style.display = 'none';
+}
+
+async function loadSettings() {
+    const data = await api('/api/settings');
+    if (data && data.retention) {
+        document.getElementById('retentionSelect').value = data.retention;
+    }
+}
+
+async function saveSettings() {
+    const retention = document.getElementById('retentionSelect').value;
+    const resp = await api('/api/settings', {
+        method: 'POST',
+        body: JSON.stringify({ retention }),
+    }, true);
+    if (resp && resp.status === 'ok') {
+        toast('✅ Đã lưu cài đặt', 'success');
+        closeSettings();
+    } else {
+        toast(resp?.error || 'Lỗi lưu cài đặt', 'error');
+    }
+}
+
+async function runCleanupNow() {
+    if (!confirm('Xóa tất cả files đã hết hạn lưu trữ?')) return;
+    const btn = document.getElementById('btnCleanupNow');
+    btn.disabled = true;
+    btn.textContent = 'Đang xóa...';
+    const resp = await api('/api/cleanup/run', { method: 'POST' }, true);
+    btn.disabled = false;
+    btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M5.5 5.5A.5.5 0 016 6v6a.5.5 0 01-1 0V6a.5.5 0 01.5-.5zm2.5 0a.5.5 0 01.5.5v6a.5.5 0 01-1 0V6a.5.5 0 01.5-.5zm3 .5a.5.5 0 00-1 0v6a.5.5 0 001 0V6z"/><path fill-rule="evenodd" d="M14.5 3a1 1 0 01-1 1H13v9a2 2 0 01-2 2H5a2 2 0 01-2-2V4h-.5a1 1 0 01-1-1V2a1 1 0 011-1H6a1 1 0 011-1h2a1 1 0 011 1h3.5a1 1 0 011 1v1zM4.118 4L4 4.059V13a1 1 0 001 1h6a1 1 0 001-1V4.059L11.882 4H4.118zM2.5 3V2h11v1h-11z"/></svg> Dọn dẹp ngay`;
+    if (resp && resp.status === 'ok') {
+        if (resp.skipped) {
+            toast('⏭ Chế độ "Không xóa" — không có file nào bị xóa', 'info');
+        } else if (resp.deleted > 0) {
+            toast(`🗑 Đã xóa ${resp.deleted} files (${resp.freed_mb} MB)`, 'success');
+            await loadStats();
+            await loadHistory();
+        } else {
+            toast('✅ Không có file nào hết hạn', 'info');
+        }
+    } else {
+        toast(resp?.error || 'Lỗi dọn dẹp', 'error');
+    }
+}
+
+// Close modal on ESC or overlay click
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeSettings();
+});
+document.addEventListener('click', (e) => {
+    if (e.target.id === 'settingsModal') closeSettings();
+});
+
 // ── Auth ───────────────────────────────────────────────────────────────────
 async function showApp() {
     document.getElementById('loginScreen').classList.remove('visible');
     document.getElementById('appContainer').style.display = '';
+    updateUserMenu();
     await loadStockData();
     await loadStats();
     await loadHistory();
@@ -483,6 +567,17 @@ async function showApp() {
     initTickerAutocomplete();
     initHistorySearch();
     connectWebSocket();
+}
+
+function updateUserMenu() {
+    const name = state.username || 'Admin';
+    const initial = name.charAt(0).toUpperCase();
+    const avatarEl = document.getElementById('avatarInitial');
+    const dropdownAvatarEl = document.getElementById('dropdownAvatarInitial');
+    const usernameEl = document.getElementById('dropdownUsername');
+    if (avatarEl) avatarEl.textContent = initial;
+    if (dropdownAvatarEl) dropdownAvatarEl.textContent = initial;
+    if (usernameEl) usernameEl.textContent = name;
 }
 
 async function submitLogin(e) {
@@ -501,7 +596,9 @@ async function submitLogin(e) {
 
     if (data.ok && data.token) {
         state.adminToken = data.token;
+        state.username = user;
         localStorage.setItem('stockreport_admin', data.token);
+        localStorage.setItem('stockreport_user', user);
         document.getElementById('loginForm').reset();
         await showApp();
     } else {
@@ -512,9 +609,13 @@ async function submitLogin(e) {
 
 function logout() {
     state.adminToken = null;
+    state.username = '';
     localStorage.removeItem('stockreport_admin');
+    localStorage.removeItem('stockreport_user');
     document.getElementById('appContainer').style.display = 'none';
     document.getElementById('loginScreen').classList.add('visible');
+    const userMenu = document.getElementById('userMenu');
+    if (userMenu) userMenu.classList.remove('open');
     if (state.ws) state.ws.close();
 }
 
@@ -537,6 +638,7 @@ function connectWebSocket() {
         try {
             const data = JSON.parse(msg.data);
             if (data.type === 'progress') handleProgress(data);
+            else if (data.type === 'sync_progress') handleSyncProgress(data);
         } catch (e) {
             console.error('WS parse error', e);
         }
@@ -589,10 +691,16 @@ function handleProgress(data) {
         document.getElementById('progressBar').style.width = pct + '%';
     }
 
-    // Text
+    // Text — multi-ticker aware
+    let tickerPrefix = '';
+    if (data.total_tickers > 1 && data.current_ticker) {
+        tickerPrefix = `🏷 [${data.current_ticker}] (${data.ticker_index}/${data.total_tickers}) — `;
+    } else if (data.total_tickers === 1 && data.current_ticker) {
+        tickerPrefix = `🏷 [${data.current_ticker}] `;
+    }
     const statusMap = {
         'starting': '🚀 Đang khởi động...',
-        'running': `📃 Trang ${data.current_page || '?'}/${data.total_pages || '?'}`,
+        'running': `${tickerPrefix}📃 Trang ${data.current_page || '?'}/${data.total_pages || '?'}`,
         'completed': '✅ Hoàn thành!',
         'stopped': '⛔ Đã dừng',
         'error': `❌ Lỗi: ${data.error || ''}`,
@@ -605,6 +713,7 @@ function handleProgress(data) {
     const ds = data.drive_synced ?? 0;
     let statsText = `Tải: ${d} | Bỏ qua: ${s} | Lỗi: ${f}`;
     if (ds > 0) statsText += ` | Drive: ${ds}`;
+    if (data.total_tickers > 1) statsText += ` | Tickers: ${data.ticker_index}/${data.total_tickers}`;
     if (fs > 0 || ft > 0) {
         statsText += ` | Lọc bỏ: ${fs} (mã) + ${ft} (thời gian)`;
     }
@@ -645,6 +754,43 @@ function handleProgress(data) {
         lastProgressStatus = data.status;
     } else {
         lastProgressStatus = data.status;
+    }
+}
+
+let lastSyncStatus = '';
+
+function handleSyncProgress(data) {
+    const st = data.status;
+    const syncType = data.sync_type;
+
+    if (st === 'running' && syncType === 'drive') {
+        const uploaded = data.uploaded || 0;
+        const skipped = data.skipped || 0;
+        const total = data.total || 0;
+        const current = data.current_index || 0;
+        const file = data.current_file || '';
+        if (current > 0 && lastSyncStatus !== `drive_${current}`) {
+            toast(`☁ Drive: ${file} (${current}/${total}) — ↑${uploaded} ⏭${skipped}`, 'info');
+            lastSyncStatus = `drive_${current}`;
+        }
+    } else if (st === 'completed') {
+        if (syncType === 'drive') {
+            const u = data.uploaded || 0;
+            const s = data.skipped || 0;
+            const e = data.errors || 0;
+            toast(`✅ Drive sync hoàn tất: ${u} uploaded, ${s} skipped, ${e} errors`, 'success');
+        } else if (syncType === 'sheet') {
+            const rows = data.rows || 0;
+            if (data.skipped) {
+                toast(`⏭ Sheet sync: dữ liệu không thay đổi (${rows} rows)`, 'info');
+            } else {
+                toast(`✅ Sheet sync hoàn tất: ${rows} rows`, 'success');
+            }
+        }
+        lastSyncStatus = '';
+    } else if (st === 'error') {
+        toast(`❌ Sync lỗi: ${data.error || 'Unknown'}`, 'error');
+        lastSyncStatus = '';
     }
 }
 
