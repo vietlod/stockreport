@@ -169,17 +169,19 @@ function initTabs() {
 }
 
 // ── Year Selects ───────────────────────────────────────────────────────────
+const YEAR_MIN = 2012;
+
 function initYearSelects() {
     const now = new Date().getFullYear();
     const years = [];
-    for (let y = now; y >= now - 10; y--) years.push(y);
+    for (let y = now; y >= YEAR_MIN; y--) years.push(y);
 
     ['fromYear', 'toYear'].forEach(id => {
         const sel = document.getElementById(id);
         sel.innerHTML = years.map(y => `<option value="${y}">${y}</option>`).join('');
     });
     document.getElementById('toYear').value = now;
-    document.getElementById('fromYear').value = now - 2;
+    document.getElementById('fromYear').value = YEAR_MIN;
 }
 
 // ── Ticker Autocomplete ───────────────────────────────────────────────────
@@ -597,8 +599,12 @@ function handleProgress(data) {
 
     // Stats - luôn hiển thị từ data
     const d = data.downloaded ?? 0, s = data.skipped ?? 0, f = data.failed ?? 0;
-    document.getElementById('progressStats').textContent =
-        `Tải: ${d} | Bỏ qua: ${s} | Lỗi: ${f}`;
+    const fs = data.filtered_stock ?? 0, ft = data.filtered_time ?? 0;
+    let statsText = `Tải: ${d} | Bỏ qua: ${s} | Lỗi: ${f}`;
+    if (fs > 0 || ft > 0) {
+        statsText += ` | Lọc bỏ: ${fs} (mã) + ${ft} (thời gian)`;
+    }
+    document.getElementById('progressStats').textContent = statsText;
 
     // Log entry - chỉ thêm khi khác entry trước (tránh lặp do polling)
     if (data.current_entry && data.current_entry !== lastLoggedEntry) {
@@ -615,7 +621,11 @@ function handleProgress(data) {
         loadStats();
         loadHistory();
         if (data.status === 'completed' && lastProgressStatus !== 'completed') {
-            toast(`Scraping hoàn thành! Tải: ${d}, Bỏ qua: ${s}, Lỗi: ${f}`, 'success');
+            let msg = `Scraping hoàn thành! Tải: ${d}, Bỏ qua: ${s}, Lỗi: ${f}`;
+            if (d === 0 && s === 0 && f === 0 && (fs > 0 || ft > 0)) {
+                msg += `. Tất cả entry bị lọc bỏ (mã: ${fs}, thời gian: ${ft}). Thử mở rộng bộ lọc hoặc bỏ chọn Ngành/Sàn/Chỉ số để tải tất cả.`;
+            }
+            toast(msg, d > 0 ? 'success' : 'info');
         }
         lastProgressStatus = data.status;
     } else {

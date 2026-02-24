@@ -115,6 +115,8 @@ class ScrapeJob:
             "downloaded": 0,
             "skipped": 0,
             "failed": 0,
+            "filtered_stock": 0,
+            "filtered_time": 0,
             "current_entry": "",
             "started_at": datetime.now().isoformat(),
         }
@@ -172,6 +174,8 @@ class ScrapeJob:
                 self.progress["downloaded"] = scraper.downloaded
                 self.progress["skipped"] = scraper.skipped
                 self.progress["failed"] = scraper.failed
+                self.progress["filtered_stock"] = scraper.filtered_stock
+                self.progress["filtered_time"] = scraper.filtered_time
                 self._broadcast_sync({"type": "progress", **self.progress})
 
             scraper._process_entry = patched_process
@@ -194,6 +198,8 @@ class ScrapeJob:
             self.progress["downloaded"] = scraper.downloaded
             self.progress["skipped"] = scraper.skipped
             self.progress["failed"] = scraper.failed
+            self.progress["filtered_stock"] = scraper.filtered_stock
+            self.progress["filtered_time"] = scraper.filtered_time
             self.progress["status"] = "completed"
             self.progress["completed_at"] = datetime.now().isoformat()
 
@@ -201,11 +207,15 @@ class ScrapeJob:
             self.progress["downloaded"] = scraper.downloaded
             self.progress["skipped"] = scraper.skipped
             self.progress["failed"] = scraper.failed
+            self.progress["filtered_stock"] = scraper.filtered_stock
+            self.progress["filtered_time"] = scraper.filtered_time
             self.progress["status"] = "stopped"
         except Exception as e:
             self.progress["downloaded"] = scraper.downloaded if scraper else 0
             self.progress["skipped"] = scraper.skipped if scraper else 0
             self.progress["failed"] = scraper.failed if scraper else 0
+            self.progress["filtered_stock"] = scraper.filtered_stock if scraper else 0
+            self.progress["filtered_time"] = scraper.filtered_time if scraper else 0
             self.progress["status"] = "error"
             self.progress["error"] = str(e)
             log.error(f"Scrape error: {e}", exc_info=True)

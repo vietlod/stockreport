@@ -410,11 +410,13 @@ class CafeFScraper:
     """Scraper chính sử dụng Playwright."""
 
     def __init__(self):
-        self.intercepted_apis = []  # Lưu các API endpoints đã bắt được
-        self.entries = []           # Danh sách CBTT entries
+        self.intercepted_apis = []
+        self.entries = []
         self.downloaded = 0
         self.failed = 0
-        self.skipped = 0            # Đếm số file đã bỏ qua (đã có trong history)
+        self.skipped = 0
+        self.filtered_stock = 0   # Bỏ qua vì không trong danh sách mã chọn
+        self.filtered_time = 0    # Bỏ qua vì ngoài khoảng thời gian
         self.history = DownloadHistory(PDF_DIR)
 
     def _on_response(self, response):
@@ -634,11 +636,13 @@ class CafeFScraper:
         if STOCK_CODE and stock:
             allowed = {s.strip().upper() for s in STOCK_CODE.split(",") if s.strip()}
             if allowed and stock.upper() not in allowed:
+                self.filtered_stock += 1
                 log.info(f"  ⏭ Bỏ qua (không trong danh sách: {len(allowed)} mã)")
                 return
 
         # Filter theo khoảng thời gian
         if not _quarter_in_range(quarter_year):
+            self.filtered_time += 1
             log.info(f"  ⏭ Bỏ qua (ngoài khoảng thời gian: {quarter_year})")
             return
 

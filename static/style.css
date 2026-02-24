@@ -101,6 +101,12 @@ body {
     gap: 12px;
 }
 
+.header-logout-wrap {
+    margin-left: 20px;
+    padding-left: 20px;
+    border-left: 1px solid var(--border);
+}
+
 .header-stats {
     display: flex;
     gap: 12px;
@@ -887,6 +893,13 @@ input::placeholder,
         flex-direction: column;
         width: 100%;
         gap: 10px;
+    }
+
+    .header-logout-wrap {
+        margin-left: 0;
+        padding-left: 0;
+        border-left: none;
+        width: 100%;
     }
 
     .header-brand h1 {
