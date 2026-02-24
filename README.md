@@ -98,6 +98,7 @@ Giao diện cho phép:
 - **Scrape** với progress realtime qua WebSocket
 - **Thống kê** download theo sàn/ngành/chỉ số
 - **Sync** lên Google Drive và Google Sheets (chạy nền, không cần giữ tab)
+- **Dọn dẹp** files theo filter (sàn, ngành, sync status) với xác nhận
 - **Cài đặt** tự động xóa files theo retention period
 
 ### CLI (chạy trực tiếp)
@@ -135,6 +136,7 @@ MAX_PAGES=0 python cafef_scraper.py
 | `GET` | `/api/settings` | Lấy cài đặt + retention options |
 | `POST` | `/api/settings` | Cập nhật cài đặt `{"retention": "1q"}` |
 | `POST` | `/api/cleanup/run` | Chạy cleanup thủ công (xóa files hết hạn) |
+| `DELETE` | `/api/history/cleanup` | Xóa records + files theo filter (exchange, icb_code, drive_synced) |
 | `WS` | `/ws/progress` | WebSocket realtime events (scrape + sync progress) |
 
 ## Quy ước đặt tên file
@@ -167,6 +169,8 @@ SQLite tại `pdf/_download_history.db`:
 | exchange | TEXT | Sàn GD |
 | file_size | INTEGER | Dung lượng (bytes) |
 | downloaded_at | TEXT | Thời gian tải (ISO) |
+| drive_synced | INTEGER | 0/1 — đã sync lên Drive |
+| drive_file_id | TEXT | Google Drive file ID |
 
 ## Auto-Delete (Cleanup)
 
@@ -194,6 +198,7 @@ Sync Drive/Sheet chạy trong background thread (daemon), **không phụ thuộc
 - **OAuth2 only**: dùng quota của user đã đăng nhập, token lưu `_google_token.json`
 - **Drive**: batch listing, so sánh file size detect corrupt, non-resumable cho < 5MB
 - **Sheet**: hash-based incremental — skip nếu data không thay đổi
+- **Sheet columns**: TICKER (hyperlink đến Drive), TIME, TYPE, EXC, IND, INDEX, DATE
 - **Tiến trình chi tiết**: broadcast qua WebSocket (`type: sync_progress`)
   - Hiển thị sub-folder + filename đang sync: `☁ Drive sync: [0570] report.pdf`
   - Counts + ETA: `45/200 — ↑12 ⏭33 | ETA: 2m30s`

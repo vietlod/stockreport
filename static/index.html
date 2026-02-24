@@ -9,6 +9,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/style.css">
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 
 <body>
@@ -29,11 +30,7 @@
             </div>
             <h1>CafeF CBTT</h1>
             <p class="login-screen-sub">Report Manager</p>
-            <form id="loginForm" class="login-screen-form" onsubmit="return submitLogin(event)">
-                <input type="text" id="loginUser" placeholder="Tên đăng nhập" autocomplete="username" required>
-                <input type="password" id="loginPass" placeholder="Mật khẩu" autocomplete="current-password" required>
-                <button type="submit" class="btn btn-primary btn-block">Đăng nhập</button>
-            </form>
+            <div id="googleSignInBtn" class="google-signin-wrap"></div>
             <p class="login-error" id="loginError"></p>
         </div>
     </div>
@@ -72,16 +69,21 @@
                 </div>
                 <div class="user-menu" id="userMenu">
                     <button class="user-avatar" id="userAvatar" title="Tài khoản">
+                        <img class="avatar-img" id="avatarImg" src="" alt="" referrerpolicy="no-referrer"
+                            style="display:none">
                         <span class="avatar-initial" id="avatarInitial">U</span>
                     </button>
                     <div class="user-dropdown" id="userDropdown">
                         <div class="dropdown-user-info">
                             <div class="dropdown-avatar">
+                                <img class="avatar-img" id="dropdownAvatarImg" src="" alt=""
+                                    referrerpolicy="no-referrer" style="display:none">
                                 <span class="avatar-initial" id="dropdownAvatarInitial">U</span>
                             </div>
                             <div class="dropdown-user-detail">
                                 <span class="dropdown-username" id="dropdownUsername">User</span>
-                                <span class="dropdown-role">Quản trị viên</span>
+                                <span class="dropdown-email" id="dropdownEmail"
+                                    style="font-size:0.75rem;color:var(--text-muted)"></span>
                             </div>
                         </div>
                         <div class="dropdown-divider"></div>
@@ -245,6 +247,9 @@
 
             <!-- Progress Panel -->
             <section class="card progress-card" id="progressCard" style="display:none">
+                <div class="bg-scrape-banner" id="bgScrapeBanner">
+                    ⚡ Quá trình tải chạy nền — đóng trình duyệt không ảnh hưởng. Dữ liệu sẽ tự đồng bộ lên Drive.
+                </div>
                 <h2 class="card-title">
                     <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
                         <path d="M10 2a8 8 0 100 16 8 8 0 000-16zm1 4v5l3 2-.7 1.2L9 12V6h2z" />
@@ -312,6 +317,10 @@
                         <option value="0">✖ Chưa đồng bộ</option>
                     </select>
                     <span class="history-count" id="historyCount"></span>
+                    <button class="btn-cleanup" id="btnCleanup" onclick="cleanupFiltered()" style="display:none"
+                        title="Xóa files theo filter hiện tại">
+                        🗑 Dọn dẹp
+                    </button>
                 </div>
                 <div class="table-wrap">
                     <table class="data-table" id="historyTable">

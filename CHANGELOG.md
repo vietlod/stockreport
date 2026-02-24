@@ -2,6 +2,47 @@
 
 Tất cả thay đổi đáng chú ý của dự án được ghi nhận tại đây.
 
+## [1.1.3] - 2026-02-25
+
+### 🚀 Tính năng mới
+
+#### Google Sign-In (`server.py`, `app.js`, `index.html`)
+- **Thay thế login hardcoded** (`tns/123colEn`) bằng Google Sign-In (GIS)
+- Endpoints: `GET /api/auth/config`, `POST /api/auth/google`
+- Email whitelist qua `ALLOWED_EMAILS` trong `.env`
+- Hiển thị Google avatar + email trong user menu
+
+#### Dọn dẹp theo Filter (`server.py`, `app.js`, `index.html`)
+- **Nút "🗑 Dọn dẹp"**: xuất hiện khi có ít nhất 1 filter active trong bảng Lịch sử
+- Xóa files PDF local + records DB theo filter hiện tại (exchange, ICB, sync status, mã CK)
+- Dialog xác nhận hiển thị chi tiết filter + số lượng records
+- Tự dọn thư mục ICB rỗng sau khi xóa
+- Endpoint: `DELETE /api/history/cleanup`
+
+#### TICKER Hyperlink (`google_sync.py`, `app.js`)
+- **Bảng Lịch sử**: TICKER hiển thị link xanh đến file trên Google Drive (khi đã sync)
+- **Google Sheet CAFEF**: TICKER dùng `=HYPERLINK()` formula link đến Drive
+
+### 🔧 Cải tiến
+
+#### Google Sheet CAFEF (`google_sync.py`)
+- Fix Sheet trống: đổi `valueInputOption` → `USER_ENTERED` (hỗ trợ formula)
+- Thêm cột **DATE** (ngày tải)
+- Hash moved G1 → H1 (offset do thêm cột)
+- Logging khi data rỗng
+
+#### Drive File ID Tracking (`google_sync.py`, `cafef_scraper.py`, `server.py`)
+- `upload_single()` trả file ID (str) thay vì bool
+- `_file_exists()` → `_find_file_id()` (trả Drive ID)
+- Cột `drive_file_id TEXT` trong DB (auto-migration)
+- `on_download()` lưu `drive_file_id` vào DB
+
+#### Background Scrape UX (`index.html`, `style.css`)
+- Banner "Quá trình tải chạy nền — đóng trình duyệt không ảnh hưởng"
+- WS reconnect + poll fallback đã có sẵn
+
+---
+
 ## [1.1.2] - 2026-02-24
 
 ### 🚀 Tính năng mới

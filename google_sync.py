@@ -176,14 +176,15 @@ class GoogleDriveSync:
         self._folder_cache[name] = folder_id
         return folder_id
 
-    def _file_exists(self, service, name: str, parent_id: str) -> bool:
-        """Check if file already exists in Drive folder."""
+    def _find_file_id(self, service, name: str, parent_id: str):
+        """Tìm file trên Drive, trả file ID hoặc None."""
         query = f"name='{name}' and '{parent_id}' in parents and trashed=false"
         results = service.files().list(
             q=query, fields="files(id)",
             supportsAllDrives=True, includeItemsFromAllDrives=True,
         ).execute()
-        return len(results.get("files", [])) > 0
+        files = results.get("files", [])
+        return files[0]["id"] if files else None
 
     def _list_existing_files(self, service, parent_id: str) -> dict:
         """Batch list ALL files trong folder → {name: {id, size}}.
@@ -244,13 +245,13 @@ class GoogleDriveSync:
 
         return result
 
-    def upload_single(self, pdf_path: Path) -> bool:
+    def upload_single(self, pdf_path: Path):
         """Upload một file PDF lên Drive ngay sau khi tải xong.
         
-        Returns: True nếu upload thành công hoặc file đã tồn tại, False nếu lỗi.
+        Returns: Drive file ID (str) nếu thành công/đã tồn tại, None nếu lỗi.
         """
         if not DRIVE_FOLDER_ID:
-            return False
+            return None
         try:
             from googleapiclient.http import MediaFileUpload
             service = self._service()
@@ -262,8 +263,9 @@ class GoogleDriveSync:
             else:
                 parent_id = DRIVE_FOLDER_ID
             filename = pdf_path.name
-            if self._file_exists(service, filename, parent_id):
-                return True
+            existing_id = self._find_file_id(service, filename, parent_id)
+            if existing_id:
+                return existing_id
             local_size = pdf_path.stat().st_size
             use_resumable = local_size > 5 * 1024 * 1024
             media = MediaFileUpload(
@@ -279,11 +281,11 @@ class GoogleDriveSync:
             if remote_size != local_size:
                 log.warning(f"  ⚠ Size mismatch after upload: {filename} "
                             f"(local={local_size}B, remote={remote_size}B)")
-            log.info(f"  ☁ [{filename}] → Drive ({local_size}B)")
-            return True
+            log.info(f"  ☁ [{filename}] → Drive ({local_size}B, id={result['id']})")
+            return result["id"]
         except Exception as e:
             log.warning(f"  ⚠ Drive upload failed for {pdf_path.name}: {e}")
-            return False
+            return None
 
     def upload_all(self, progress_callback=None, phase_callback=None) -> dict:
         """Upload PDFs từ PDF_DIR lên Google Drive.
@@ -472,7 +474,7 @@ class GoogleSheetSync:
 
     SHEET_NAME = "CAFEF"
     SHEET_TAB = "DATA"  # Tab name cố định, không phụ thuộc locale Google Account
-    HEADERS = ["TICKER", "TIME", "TYPE", "EXC", "IND", "INDEX"]
+    HEADERS = ["TICKER", "TIME", "TYPE", "EXC", "IND", "INDEX", "DATE"]
 
     def __init__(self):
         self.creds = _get_credentials()
@@ -531,7 +533,7 @@ class GoogleSheetSync:
         # Set headers
         service.spreadsheets().values().update(
             spreadsheetId=sheet_id,
-            range=f"{self.SHEET_TAB}!A1:F1",
+            range=f"{self.SHEET_TAB}!A1:G1",
             valueInputOption="RAW",
             body={"values": [self.HEADERS]},
         ).execute()
@@ -596,11 +598,16 @@ class GoogleSheetSync:
         conn = sqlite3.connect(str(db_path))
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
-            "SELECT DISTINCT stock_code, quarter_year, report_type, exchange, icb_code "
+            "SELECT DISTINCT stock_code, quarter_year, report_type, exchange, icb_code, "
+            "drive_file_id, downloaded_at "
             "FROM downloads WHERE stock_code != '' "
             "ORDER BY stock_code, quarter_year"
         ).fetchall()
         conn.close()
+
+        if not rows:
+            log.warning("⚠ Sheet sync: no download records found in DB")
+            return {"rows": 0, "sheet_id": sheet_id, "skipped": False, "error": "No records"}
 
         # Build sheet data
         data = []
@@ -608,14 +615,23 @@ class GoogleSheetSync:
             ticker = r["stock_code"]
             indexes = stock_registry.get_indexes(ticker)
             icb_name = stock_registry.get_icb_name(ticker)
+            drive_file_id = r["drive_file_id"] or ""
+            downloaded_at = r["downloaded_at"] or ""
+
+            # TICKER: hyperlink đến Drive file nếu đã sync
+            if drive_file_id:
+                ticker_cell = f'=HYPERLINK("https://drive.google.com/file/d/{drive_file_id}/view", "{ticker}")'
+            else:
+                ticker_cell = ticker
 
             data.append([
-                ticker,                                    # TICKER
-                r["quarter_year"] or "",                   # TIME
-                r["report_type"] or "",                    # TYPE
+                ticker_cell,                                # TICKER
+                r["quarter_year"] or "",                     # TIME
+                r["report_type"] or "",                      # TYPE
                 r["exchange"] or stock_registry.get_exchange(ticker),  # EXC
                 f"[{r['icb_code']}] {icb_name}" if r["icb_code"] else icb_name,  # IND
-                ", ".join(indexes) if indexes else "",     # INDEX
+                ", ".join(indexes) if indexes else "",       # INDEX
+                downloaded_at[:10] if downloaded_at else "", # DATE
             ])
 
         # Sort by TICKER, TIME
@@ -629,11 +645,11 @@ class GoogleSheetSync:
         data_str = json.dumps(data, ensure_ascii=False, sort_keys=True)
         new_hash = hashlib.md5(data_str.encode("utf-8")).hexdigest()
 
-        # Read stored hash from G1
+        # Read stored hash from H1
         try:
             stored = service.spreadsheets().values().get(
                 spreadsheetId=sheet_id,
-                range=f"{self.SHEET_TAB}!G1",
+                range=f"{self.SHEET_TAB}!H1",
             ).execute()
             stored_hash = (stored.get("values", [[]])[0] or [""])[0]
         except Exception:
@@ -649,7 +665,7 @@ class GoogleSheetSync:
 
         service.spreadsheets().values().clear(
             spreadsheetId=sheet_id,
-            range=f"{self.SHEET_TAB}!A2:G",
+            range=f"{self.SHEET_TAB}!A2:H",
         ).execute()
 
         # Write headers (A1:F1) + hash (G1) + data
@@ -658,7 +674,7 @@ class GoogleSheetSync:
         service.spreadsheets().values().update(
             spreadsheetId=sheet_id,
             range=f"{self.SHEET_TAB}!A1",
-            valueInputOption="RAW",
+            valueInputOption="USER_ENTERED",
             body={"values": all_values},
         ).execute()
 

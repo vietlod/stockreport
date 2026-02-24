@@ -25,6 +25,8 @@ import sys
 import json
 import time
 import sqlite3
+import secrets
+import hashlib
 import asyncio
 import logging
 import threading
@@ -38,16 +40,23 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 import uvicorn
 
-# ── Admin Auth ──────────────────────────────────────────────────────────────
-ADMIN_USER = "tns"
-ADMIN_PASS = "123colEn"
-ADMIN_TOKEN = "stockreport_admin"  # Token returned on successful login
+# ── Google Sign-In Auth ─────────────────────────────────────────────────────
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
+ALLOWED_EMAILS = [e.strip() for e in os.getenv("ALLOWED_EMAILS", "").split(",") if e.strip()]
+JWT_SECRET = os.getenv("JWT_SECRET", "") or secrets.token_hex(32)
+
+# In-memory session store: token → {email, name, sub}
+_active_sessions: dict[str, dict] = {}
 
 security = HTTPBearer(auto_error=False)
 
+def _make_session_token(email: str, sub: str) -> str:
+    """Tạo session token deterministic từ secret + user info."""
+    return hashlib.sha256(f"{JWT_SECRET}:{email}:{sub}".encode()).hexdigest()
+
 async def require_admin(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    if not credentials or credentials.credentials != ADMIN_TOKEN:
-        raise HTTPException(status_code=401, detail="Yêu cầu đăng nhập admin")
+    if not credentials or credentials.credentials not in _active_sessions:
+        raise HTTPException(status_code=401, detail="Yêu cầu đăng nhập")
     return True
 
 # ── Project imports ─────────────────────────────────────────────────────────
@@ -175,15 +184,16 @@ class ScrapeJob:
 
             def on_download(dest):
                 if drive_sync and dest.exists():
-                    if drive_sync.upload_single(dest):
+                    file_id = drive_sync.upload_single(dest)
+                    if file_id:
                         drive_sync_count[0] += 1
-                        # Mark file as synced in DB
+                        # Mark file as synced in DB + store Drive file ID
                         try:
                             db_conn = get_db()
                             if db_conn:
                                 db_conn.execute(
-                                    "UPDATE downloads SET drive_synced = 1 WHERE filename = ?",
-                                    (dest.name,)
+                                    "UPDATE downloads SET drive_synced = 1, drive_file_id = ? WHERE filename = ?",
+                                    (file_id, dest.name)
                                 )
                                 db_conn.commit()
                                 db_conn.close()
@@ -630,6 +640,94 @@ async def get_history_filters():
     return {"exchanges": exchanges, "icb_codes": icb_codes}
 
 
+@app.delete("/api/history/cleanup")
+async def cleanup_history(
+    stock_code: str = Query(None),
+    icb_code: str = Query(None),
+    exchange: str = Query(None),
+    drive_synced: int = Query(None, ge=0, le=1),
+    _admin=Depends(require_admin),
+):
+    """Xóa records theo filter: xóa file local + DB record.
+    Dùng cùng filter params như GET /api/history.
+    """
+    conn = get_db()
+    if not conn:
+        return {"deleted": 0, "freed_bytes": 0, "error": "DB not found"}
+
+    conditions = []
+    params = []
+    if stock_code:
+        conditions.append("stock_code = ?")
+        params.append(stock_code.upper())
+    if icb_code:
+        conditions.append("icb_code = ?")
+        params.append(icb_code)
+    if exchange:
+        conditions.append("exchange = ?")
+        params.append(exchange.upper())
+    if drive_synced is not None:
+        conditions.append("drive_synced = ?")
+        params.append(drive_synced)
+
+    if not conditions:
+        conn.close()
+        return {"deleted": 0, "freed_bytes": 0, "error": "Cần ít nhất 1 filter để tránh xóa toàn bộ"}
+
+    where = f"WHERE {' AND '.join(conditions)}"
+
+    # Lấy danh sách files cần xóa
+    rows = conn.execute(
+        f"SELECT id, filename, icb_code, file_size FROM downloads {where}", params
+    ).fetchall()
+
+    if not rows:
+        conn.close()
+        return {"deleted": 0, "freed_bytes": 0}
+
+    deleted = 0
+    freed = 0
+    dirs_to_check = set()
+
+    for r in rows:
+        filename = r["filename"]
+        file_icb = r["icb_code"] or ""
+        file_size = r["file_size"] or 0
+
+        # Xóa file vật lý
+        if file_icb:
+            file_path = PDF_DIR / file_icb / filename
+        else:
+            file_path = PDF_DIR / filename
+
+        try:
+            if file_path.exists():
+                file_path.unlink()
+                freed += file_size
+                if file_icb:
+                    dirs_to_check.add(PDF_DIR / file_icb)
+        except Exception as e:
+            log.warning(f"🗑 Không thể xóa file {file_path}: {e}")
+
+    # Xóa records khỏi DB
+    conn.execute(f"DELETE FROM downloads {where}", params)
+    conn.commit()
+    deleted = conn.total_changes
+    conn.close()
+
+    # Dọn thư mục ICB rỗng
+    for d in dirs_to_check:
+        try:
+            if d.exists() and not any(d.iterdir()):
+                d.rmdir()
+                log.info(f"🗑 Xóa thư mục rỗng: {d.name}")
+        except Exception:
+            pass
+
+    log.info(f"🗑 Cleanup: {deleted} records, giải phóng {freed / 1024 / 1024:.1f}MB")
+    return {"deleted": deleted, "freed_bytes": freed}
+
+
 @app.get("/api/stats")
 async def get_stats():
     """Thống kê download theo sàn/ngành/chỉ số."""
@@ -731,16 +829,52 @@ async def stop_scrape():
     return {"status": "stopping"}
 
 
-# ── Auth ────────────────────────────────────────────────────────────────────
+# ── Auth (Google Sign-In) ───────────────────────────────────────────────────
 
-@app.post("/api/auth/login")
-async def auth_login(data: dict):
-    """Đăng nhập admin. Body: {username, password}"""
-    username = (data.get("username") or "").strip()
-    password = (data.get("password") or "").strip()
-    if username == ADMIN_USER and password == ADMIN_PASS:
-        return {"ok": True, "token": ADMIN_TOKEN}
-    return JSONResponse(status_code=401, content={"ok": False, "error": "Tên đăng nhập hoặc mật khẩu không đúng"})
+@app.get("/api/auth/config")
+async def auth_config():
+    """Public: trả Google client_id cho frontend GIS."""
+    return {"google_client_id": GOOGLE_CLIENT_ID}
+
+
+@app.post("/api/auth/google")
+async def auth_google(data: dict):
+    """Xác thực Google ID token, trả session token."""
+    credential = data.get("credential", "")
+    if not credential:
+        return JSONResponse(status_code=400, content={"error": "Missing credential"})
+    try:
+        from google.oauth2 import id_token
+        from google.auth.transport import requests as google_requests
+
+        idinfo = id_token.verify_oauth2_token(
+            credential, google_requests.Request(), GOOGLE_CLIENT_ID
+        )
+        email = idinfo.get("email", "")
+        if ALLOWED_EMAILS and email not in ALLOWED_EMAILS:
+            log.warning(f"🚫 Login rejected: {email} not in whitelist")
+            return JSONResponse(status_code=403,
+                content={"error": f"Email {email} không được phép truy cập"})
+
+        sub = idinfo["sub"]
+        token = _make_session_token(email, sub)
+        _active_sessions[token] = {
+            "email": email,
+            "name": idinfo.get("name", ""),
+            "sub": sub,
+        }
+        log.info(f"✅ Login: {email}")
+        return {
+            "ok": True,
+            "token": token,
+            "email": email,
+            "name": idinfo.get("name", ""),
+            "picture": idinfo.get("picture", ""),
+        }
+    except ValueError as e:
+        log.warning(f"🚫 Invalid id_token: {e}")
+        return JSONResponse(status_code=401,
+            content={"error": f"Token không hợp lệ"})
 
 
 # ── Settings & Cleanup ──────────────────────────────────────────────────────

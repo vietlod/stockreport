@@ -256,7 +256,7 @@ class DownloadHistory:
             )
         """)
         # Migration: add columns if missing
-        for col, col_type in [("icb_code", "TEXT"), ("exchange", "TEXT"), ("drive_synced", "INTEGER DEFAULT 0")]:
+        for col, col_type in [("icb_code", "TEXT"), ("exchange", "TEXT"), ("drive_synced", "INTEGER DEFAULT 0"), ("drive_file_id", "TEXT")]:
             try:
                 self.conn.execute(f"ALTER TABLE downloads ADD COLUMN {col} {col_type}")
             except Exception:

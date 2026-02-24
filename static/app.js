@@ -17,6 +17,8 @@ const state = {
     ws: null,
     adminToken: localStorage.getItem('stockreport_admin') || null,
     username: localStorage.getItem('stockreport_user') || '',
+    userPicture: localStorage.getItem('stockreport_picture') || '',
+    userEmail: localStorage.getItem('stockreport_email') || '',
     // History filter & sort
     historySortBy: 'downloaded_at',
     historySortDir: 'desc',
@@ -55,6 +57,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     } else {
         document.getElementById('loginScreen').classList.add('visible');
     }
+
+    // Google Identity Services initialization
+    initGoogleSignIn();
 });
 
 // ── API Helpers ────────────────────────────────────────────────────────────
@@ -321,6 +326,10 @@ function applyHistoryFilters() {
     state.historyFilterICB = document.getElementById('filterICB').value;
     state.historyFilterSync = document.getElementById('filterSync').value;
     state.historyPage = 1;
+    // Show/hide cleanup button
+    const hasFilter = state.historyFilterExchange || state.historyFilterICB || state.historyFilterSync !== '';
+    const btn = document.getElementById('btnCleanup');
+    if (btn) btn.style.display = hasFilter ? '' : 'none';
     loadHistory();
 }
 
@@ -436,10 +445,13 @@ async function loadHistory() {
         const syncIcon = synced
             ? '<span class="sync-icon sync-ok" title="Đã đồng bộ lên Drive">✔</span>'
             : '<span class="sync-icon sync-no" title="Chưa đồng bộ">✖</span>';
+        const tickerDisplay = r.drive_file_id
+            ? `<a href="https://drive.google.com/file/d/${r.drive_file_id}/view" target="_blank" class="ticker-link">${r.stock_code || '-'}</a>`
+            : (r.stock_code || '-');
         return `
         <tr>
             <td><span class="icb-badge">${r.icb_code || '-'}</span></td>
-            <td class="ticker-cell">${r.stock_code || '-'}</td>
+            <td class="ticker-cell">${tickerDisplay}</td>
             <td>${r.quarter_year || '-'}</td>
             <td>${r.report_type || '-'}</td>
             <td>${r.exchange || '-'}</td>
@@ -470,6 +482,53 @@ function renderPagination(total) {
 function goPage(page) {
     state.historyPage = page;
     loadHistory();
+}
+
+async function cleanupFiltered() {
+    // Build filter description
+    const filters = [];
+    if (state.historyFilterExchange) filters.push(`Sàn: ${state.historyFilterExchange}`);
+    if (state.historyFilterICB) filters.push(`ICB: ${state.historyFilterICB}`);
+    if (state.historyFilterSync === '1') filters.push('Đã đồng bộ');
+    else if (state.historyFilterSync === '0') filters.push('Chưa đồng bộ');
+
+    const search = document.getElementById('historySearch').value.trim();
+    if (search) filters.push(`Mã: ${search.toUpperCase()}`);
+
+    if (!filters.length) {
+        showToast('Chọn ít nhất 1 bộ lọc trước khi dọn dẹp', 'error');
+        return;
+    }
+
+    // Get total count from current data
+    const countEl = document.getElementById('historyCount');
+    const countText = countEl ? countEl.textContent : '';
+
+    const msg = `⚠️ Xóa tất cả files theo filter:\n\n• ${filters.join('\n• ')}\n\n${countText}\n\nHành động này không thể hoàn tác. Tiếp tục?`;
+    if (!confirm(msg)) return;
+
+    // Build query params
+    const params = new URLSearchParams();
+    if (search) params.set('stock_code', search.toUpperCase());
+    if (state.historyFilterExchange) params.set('exchange', state.historyFilterExchange);
+    if (state.historyFilterICB) params.set('icb_code', state.historyFilterICB);
+    if (state.historyFilterSync !== '') params.set('drive_synced', state.historyFilterSync);
+
+    const result = await api(`/api/history/cleanup?${params}`, { method: 'DELETE' });
+    if (!result) return;
+
+    if (result.error) {
+        showToast(result.error, 'error');
+        return;
+    }
+
+    const freedMB = (result.freed_bytes / 1024 / 1024).toFixed(1);
+    showToast(`🗑 Đã xóa ${result.deleted} records (${freedMB}MB)`, 'success');
+
+    // Reload
+    state.historyPage = 1;
+    loadHistory();
+    loadStats();
 }
 
 // ── Scrape Job ─────────────────────────────────────────────────────────────
@@ -684,53 +743,109 @@ async function showApp() {
 }
 
 function updateUserMenu() {
-    const name = state.username || 'Admin';
+    const name = state.username || 'User';
+    const picture = state.userPicture || localStorage.getItem('stockreport_picture');
+    const email = state.userEmail || localStorage.getItem('stockreport_email') || '';
     const initial = name.charAt(0).toUpperCase();
-    const avatarEl = document.getElementById('avatarInitial');
-    const dropdownAvatarEl = document.getElementById('dropdownAvatarInitial');
+
+    const avatarInitial = document.getElementById('avatarInitial');
+    const avatarImg = document.getElementById('avatarImg');
+    const dropdownAvatarInitial = document.getElementById('dropdownAvatarInitial');
+    const dropdownAvatarImg = document.getElementById('dropdownAvatarImg');
     const usernameEl = document.getElementById('dropdownUsername');
-    if (avatarEl) avatarEl.textContent = initial;
-    if (dropdownAvatarEl) dropdownAvatarEl.textContent = initial;
+    const emailEl = document.getElementById('dropdownEmail');
+
+    if (picture) {
+        if (avatarImg) { avatarImg.src = picture; avatarImg.style.display = ''; }
+        if (avatarInitial) avatarInitial.style.display = 'none';
+        if (dropdownAvatarImg) { dropdownAvatarImg.src = picture; dropdownAvatarImg.style.display = ''; }
+        if (dropdownAvatarInitial) dropdownAvatarInitial.style.display = 'none';
+    } else {
+        if (avatarImg) avatarImg.style.display = 'none';
+        if (avatarInitial) { avatarInitial.textContent = initial; avatarInitial.style.display = ''; }
+        if (dropdownAvatarImg) dropdownAvatarImg.style.display = 'none';
+        if (dropdownAvatarInitial) { dropdownAvatarInitial.textContent = initial; dropdownAvatarInitial.style.display = ''; }
+    }
     if (usernameEl) usernameEl.textContent = name;
+    if (emailEl) emailEl.textContent = email;
 }
 
-async function submitLogin(e) {
-    e.preventDefault();
-    const user = document.getElementById('loginUser').value.trim();
-    const pass = document.getElementById('loginPass').value;
-    const errEl = document.getElementById('loginError');
-    errEl.textContent = '';
-
-    const resp = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: user, password: pass }),
-    });
-    const data = await resp.json().catch(() => ({}));
-
-    if (data.ok && data.token) {
-        state.adminToken = data.token;
-        state.username = user;
-        localStorage.setItem('stockreport_admin', data.token);
-        localStorage.setItem('stockreport_user', user);
-        document.getElementById('loginForm').reset();
-        await showApp();
-    } else {
-        errEl.textContent = data.error || 'Đăng nhập thất bại';
+// ── Google Sign-In ─────────────────────────────────────────────────────────
+async function initGoogleSignIn() {
+    try {
+        const resp = await fetch('/api/auth/config');
+        const config = await resp.json();
+        if (!config.google_client_id) {
+            console.error('GOOGLE_CLIENT_ID not configured on server');
+            return;
+        }
+        google.accounts.id.initialize({
+            client_id: config.google_client_id,
+            callback: handleGoogleSignIn,
+            auto_select: !!state.adminToken,
+        });
+        const btnEl = document.getElementById('googleSignInBtn');
+        if (btnEl) {
+            google.accounts.id.renderButton(btnEl, {
+                theme: 'filled_blue',
+                size: 'large',
+                shape: 'pill',
+                text: 'signin_with',
+                locale: 'vi_VN',
+                width: 300,
+            });
+        }
+    } catch (e) {
+        console.error('Failed to init Google Sign-In:', e);
     }
-    return false;
+}
+
+async function handleGoogleSignIn(response) {
+    const errEl = document.getElementById('loginError');
+    if (errEl) errEl.textContent = '';
+
+    try {
+        const resp = await fetch('/api/auth/google', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ credential: response.credential }),
+        });
+        const data = await resp.json().catch(() => ({}));
+
+        if (data.ok && data.token) {
+            state.adminToken = data.token;
+            state.username = data.name || data.email;
+            state.userPicture = data.picture || '';
+            state.userEmail = data.email || '';
+            localStorage.setItem('stockreport_admin', data.token);
+            localStorage.setItem('stockreport_user', state.username);
+            localStorage.setItem('stockreport_picture', state.userPicture);
+            localStorage.setItem('stockreport_email', state.userEmail);
+            await showApp();
+        } else {
+            if (errEl) errEl.textContent = data.error || 'Đăng nhập thất bại';
+        }
+    } catch (e) {
+        if (errEl) errEl.textContent = 'Lỗi kết nối server';
+    }
 }
 
 function logout() {
     state.adminToken = null;
     state.username = '';
+    state.userPicture = '';
+    state.userEmail = '';
     localStorage.removeItem('stockreport_admin');
     localStorage.removeItem('stockreport_user');
+    localStorage.removeItem('stockreport_picture');
+    localStorage.removeItem('stockreport_email');
     document.getElementById('appContainer').style.display = 'none';
     document.getElementById('loginScreen').classList.add('visible');
     const userMenu = document.getElementById('userMenu');
     if (userMenu) userMenu.classList.remove('open');
     if (state.ws) state.ws.close();
+    // Revoke Google auto-select
+    try { google.accounts.id.disableAutoSelect(); } catch (_) { }
 }
 
 // ── WebSocket + Polling fallback ───────────────────────────────────────────
