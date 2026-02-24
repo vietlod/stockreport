@@ -502,9 +502,10 @@ function logout() {
     if (state.ws) state.ws.close();
 }
 
-// ── WebSocket ──────────────────────────────────────────────────────────────
+// ── WebSocket + Polling fallback ───────────────────────────────────────────
 let wsReconnectDelay = 3000;
 const WS_MAX_DELAY = 60000;
+let pollInterval = null;
 
 function connectWebSocket() {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -513,6 +514,7 @@ function connectWebSocket() {
     ws.onopen = () => {
         wsReconnectDelay = 3000;
         state.ws = ws;
+        stopPolling();
     };
 
     ws.onmessage = (msg) => {
@@ -526,6 +528,7 @@ function connectWebSocket() {
 
     ws.onclose = () => {
         state.ws = null;
+        startPolling();
         const delay = wsReconnectDelay;
         wsReconnectDelay = Math.min(wsReconnectDelay * 1.5, WS_MAX_DELAY);
         setTimeout(connectWebSocket, delay);
@@ -533,14 +536,27 @@ function connectWebSocket() {
 
     ws.onerror = () => ws.close();
 
-    // Keepalive ping
     const pingInterval = setInterval(() => {
-        if (ws.readyState === WebSocket.OPEN) {
-            ws.send('ping');
-        } else {
-            clearInterval(pingInterval);
-        }
+        if (ws.readyState === WebSocket.OPEN) ws.send('ping');
+        else clearInterval(pingInterval);
     }, 25000);
+}
+
+function startPolling() {
+    if (pollInterval) return;
+    pollInterval = setInterval(async () => {
+        const data = await api('/api/scrape/status');
+        if (data?.progress && Object.keys(data.progress).length) {
+            handleProgress({ type: 'progress', ...data.progress });
+        }
+    }, 2000);
+}
+
+function stopPolling() {
+    if (pollInterval) {
+        clearInterval(pollInterval);
+        pollInterval = null;
+    }
 }
 
 function handleProgress(data) {
