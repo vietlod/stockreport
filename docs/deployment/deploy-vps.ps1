@@ -15,7 +15,7 @@ Write-Host "=== Stock Report VPS Deploy ===" -ForegroundColor Cyan
 # 1. Create dir, clone or pull
 Write-Host "[1/7] Clone/Pull code..." -ForegroundColor Gray
 Run-VPS "mkdir -p $PROJECT_DIR"
-Run-VPS "cd $PROJECT_DIR && (test -d .git && (git fetch origin && git checkout dev && git pull origin dev) || git clone -b dev https://github.com/vietlod/stockreport.git .)"
+Run-VPS "cd $PROJECT_DIR && (test -d .git && (git fetch origin && git checkout dev && git reset --hard origin/dev) || git clone -b dev https://github.com/vietlod/stockreport.git .)"
 
 # 2. Python venv + deps
 Write-Host "[2/7] Python deps..." -ForegroundColor Gray
