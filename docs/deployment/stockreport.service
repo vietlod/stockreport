@@ -1,0 +1,20 @@
+# Stock Report - systemd service
+# Install: cp stockreport.service /etc/systemd/system/ && systemctl daemon-reload
+# Port 8002 (tránh conflict với ecodata:8000, stock-api:8001)
+
+[Unit]
+Description=Stock Report - CafeF CBTT Manager
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/stockreport
+Environment="PATH=/opt/stockreport/.venv/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="PORT=8002"
+ExecStart=/opt/stockreport/.venv/bin/python server.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
