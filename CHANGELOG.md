@@ -34,6 +34,7 @@ Tất cả thay đổi đáng chú ý của dự án được ghi nhận tại �
 - **Non-resumable upload**: files < 5MB dùng non-resumable (fix empty files trên Drive)
 - **Upload verification**: request `id,size` fields sau upload, log warning nếu size mismatch
 - **Diagnostic endpoint**: `GET /api/gdrive/test` — test upload 1 file + trả kết quả chi tiết
+- **Shared Drive support**: `supportsAllDrives=True` cho tất cả Drive API calls (list, create, delete)
 
 #### Google Sheet Sync (`google_sync.py`)
 - **Hash-based incremental**: MD5 hash data → lưu vào G1 → skip nếu data không đổi

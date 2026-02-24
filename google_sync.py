@@ -140,19 +140,25 @@ class GoogleDriveSync:
             f"name='{name}' and '{parent_id}' in parents "
             f"and mimeType='application/vnd.google-apps.folder' and trashed=false"
         )
-        results = service.files().list(q=query, fields="files(id)").execute()
+        results = service.files().list(
+            q=query, fields="files(id)",
+            supportsAllDrives=True, includeItemsFromAllDrives=True,
+        ).execute()
         files = results.get("files", [])
 
         if files:
             folder_id = files[0]["id"]
         else:
-            # Create new folder
+            # Create new folder (supportsAllDrives for Shared Drive parent)
             meta = {
                 "name": name,
                 "mimeType": "application/vnd.google-apps.folder",
                 "parents": [parent_id],
             }
-            folder = service.files().create(body=meta, fields="id").execute()
+            folder = service.files().create(
+                body=meta, fields="id",
+                supportsAllDrives=True,
+            ).execute()
             folder_id = folder["id"]
             log.info(f"  📁 Created Drive folder: {name}")
 
@@ -162,7 +168,10 @@ class GoogleDriveSync:
     def _file_exists(self, service, name: str, parent_id: str) -> bool:
         """Check if file already exists in Drive folder."""
         query = f"name='{name}' and '{parent_id}' in parents and trashed=false"
-        results = service.files().list(q=query, fields="files(id)").execute()
+        results = service.files().list(
+            q=query, fields="files(id)",
+            supportsAllDrives=True, includeItemsFromAllDrives=True,
+        ).execute()
         return len(results.get("files", [])) > 0
 
     def _list_existing_files(self, service, parent_id: str) -> dict:
@@ -179,6 +188,7 @@ class GoogleDriveSync:
                 fields="nextPageToken, files(id, name, size)",
                 pageSize=1000,
                 pageToken=page_token,
+                supportsAllDrives=True, includeItemsFromAllDrives=True,
             ).execute()
             for f in resp.get("files", []):
                 result[f["name"]] = {
@@ -209,6 +219,7 @@ class GoogleDriveSync:
                 fields="nextPageToken, files(id, name)",
                 pageSize=100,
                 pageToken=page_token,
+                supportsAllDrives=True, includeItemsFromAllDrives=True,
             ).execute()
             for folder in resp.get("files", []):
                 folder_name = folder["name"]
@@ -250,7 +261,8 @@ class GoogleDriveSync:
             )
             result = service.files().create(
                 body={"name": filename, "parents": [parent_id]},
-                media_body=media, fields="id,size"
+                media_body=media, fields="id,size",
+                supportsAllDrives=True,
             ).execute()
             remote_size = int(result.get("size", 0))
             if remote_size != local_size:
@@ -333,7 +345,10 @@ class GoogleDriveSync:
                     # Delete corrupt remote file if size mismatch
                     if remote_info and remote_info["size"] != local_size:
                         try:
-                            service.files().delete(fileId=remote_info["id"]).execute()
+                            service.files().delete(
+                                fileId=remote_info["id"],
+                                supportsAllDrives=True,
+                            ).execute()
                             log.info(f"  🗑 Deleted corrupt remote: {relative_key} "
                                      f"(remote={remote_info['size']}B, local={local_size}B)")
                         except Exception:
@@ -351,7 +366,8 @@ class GoogleDriveSync:
                         "parents": [parent_id],
                     }
                     result = service.files().create(
-                        body=file_meta, media_body=media, fields="id,size"
+                        body=file_meta, media_body=media, fields="id,size",
+                        supportsAllDrives=True,
                     ).execute()
 
                     stats["uploaded"] += 1

@@ -799,7 +799,8 @@ async def gdrive_test(_: bool = Depends(require_admin)):
         )
         result = service.files().create(
             body={"name": f"_test_{filename}", "parents": [parent_id]},
-            media_body=media, fields="id,name,size,mimeType"
+            media_body=media, fields="id,name,size,mimeType",
+            supportsAllDrives=True,
         ).execute()
 
         return {
