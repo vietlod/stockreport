@@ -31,15 +31,16 @@ load_dotenv()
 log = logging.getLogger("google_sync")
 
 # ── Config ──────────────────────────────────────────────────────────────────
-CREDENTIALS_FILE = os.getenv("GOOGLE_SERVICE_ACCOUNT_KEY", "./google_oauth_credentials.json")
+# OAuth credentials (mặc định) — dùng quota của user đã đăng nhập
+OAUTH_CREDENTIALS_FILE = os.getenv("GOOGLE_OAUTH_CREDENTIALS", "./google_oauth_credentials.json")
+# Service Account (fallback) — KHÔNG có storage quota, chỉ dùng cho Shared Drives
+SA_CREDENTIALS_FILE = os.getenv("GOOGLE_SERVICE_ACCOUNT_KEY", "./service_account.json")
 DRIVE_FOLDER_ID = os.getenv("GOOGLE_DRIVE_FOLDER_ID", "")
 SHEET_FOLDER_ID = os.getenv("GOOGLE_SHEET_FOLDER_ID", "")
 PDF_DIR = Path(os.getenv("PDF_DIR", "./pdf"))
 TOKEN_FILE = Path(__file__).parent / "_google_token.json"
 
 # Google API scopes
-# drive: full access (required for service account accessing shared folders)
-# drive.file chỉ cho phép truy cập files do app tạo → gây lỗi upload vào shared folder
 SCOPES = [
     "https://www.googleapis.com/auth/drive",
     "https://www.googleapis.com/auth/spreadsheets",
@@ -57,51 +58,61 @@ def _is_service_account_file(path: str) -> bool:
 
 
 def _get_credentials():
-    """Get credentials: Service Account (no consent) or OAuth2 (browser consent).
+    """Get credentials: Ưu tiên OAuth2, fallback Service Account.
     
-    - Service Account: uses GOOGLE_SERVICE_ACCOUNT_KEY → service_account.json
-    - OAuth2: uses client secrets (web/installed) → token saved to _google_token.json
+    1. OAuth2 (google_oauth_credentials.json): dùng quota của user, cần browser consent lần đầu
+    2. Service Account (service_account.json): KHÔNG có storage quota, chỉ dùng cho Shared Drives
     """
-    creds_path = Path(CREDENTIALS_FILE)
-    if not creds_path.exists():
-        raise FileNotFoundError(
-            f"Google credentials file not found: {CREDENTIALS_FILE}\n"
-            f"Set GOOGLE_SERVICE_ACCOUNT_KEY in .env (Service Account) or use OAuth client secrets."
-        )
+    oauth_path = Path(OAUTH_CREDENTIALS_FILE)
+    sa_path = Path(SA_CREDENTIALS_FILE)
 
-    # Service Account: no browser, no token file
-    if _is_service_account_file(str(creds_path)):
+    # ── Ưu tiên OAuth2 ──
+    if oauth_path.exists() and not _is_service_account_file(str(oauth_path)):
+        from google.oauth2.credentials import Credentials
+        from google_auth_oauthlib.flow import InstalledAppFlow
+        from google.auth.transport.requests import Request
+
+        creds = None
+        if TOKEN_FILE.exists():
+            try:
+                creds = Credentials.from_authorized_user_file(str(TOKEN_FILE), SCOPES)
+            except Exception:
+                log.warning("🔑 Token file hỏng, sẽ tạo mới")
+                TOKEN_FILE.unlink(missing_ok=True)
+
+        if not creds or not creds.valid:
+            if creds and creds.expired and creds.refresh_token:
+                log.info("🔄 Refreshing Google OAuth token...")
+                creds.refresh(Request())
+            else:
+                log.info("🔑 Opening browser for Google OAuth consent...")
+                flow = InstalledAppFlow.from_client_secrets_file(
+                    str(oauth_path), SCOPES,
+                    redirect_uri="http://localhost:8080"
+                )
+                creds = flow.run_local_server(port=8080, open_browser=True)
+
+            TOKEN_FILE.write_text(creds.to_json())
+            log.info(f"💾 Token saved to {TOKEN_FILE}")
+
+        log.info("🔑 Using OAuth2 credentials (user quota)")
+        return creds
+
+    # ── Fallback: Service Account ──
+    if sa_path.exists() and _is_service_account_file(str(sa_path)):
         from google.oauth2 import service_account
-        log.info("🔑 Using Service Account credentials")
+        log.warning("🔑 Using Service Account — Lưu ý: SA không có storage quota, "
+                    "chỉ hỗ trợ Shared Drives. Khuyến nghị dùng OAuth2.")
         return service_account.Credentials.from_service_account_file(
-            str(creds_path), scopes=SCOPES
+            str(sa_path), scopes=SCOPES
         )
 
-    # OAuth2 flow (web/installed app)
-    from google.oauth2.credentials import Credentials
-    from google_auth_oauthlib.flow import InstalledAppFlow
-    from google.auth.transport.requests import Request
-
-    creds = None
-    if TOKEN_FILE.exists():
-        creds = Credentials.from_authorized_user_file(str(TOKEN_FILE), SCOPES)
-
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            log.info("🔄 Refreshing Google OAuth token...")
-            creds.refresh(Request())
-        else:
-            log.info("🔑 Opening browser for Google OAuth consent...")
-            flow = InstalledAppFlow.from_client_secrets_file(
-                CREDENTIALS_FILE, SCOPES,
-                redirect_uri="http://localhost:8080"
-            )
-            creds = flow.run_local_server(port=8080, open_browser=True)
-
-        TOKEN_FILE.write_text(creds.to_json())
-        log.info(f"💾 Token saved to {TOKEN_FILE}")
-
-    return creds
+    raise FileNotFoundError(
+        f"Không tìm thấy credentials file:\n"
+        f"  OAuth: {OAUTH_CREDENTIALS_FILE}\n"
+        f"  Service Account: {SA_CREDENTIALS_FILE}\n"
+        f"Đặt google_oauth_credentials.json vào thư mục root."
+    )
 
 
 # ═══════════════════════════════════════════════════════════════════════════

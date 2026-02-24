@@ -25,10 +25,13 @@ Tất cả thay đổi đáng chú ý của dự án được ghi nhận tại �
 ### 🔧 Cải tiến
 
 #### Google Drive Sync (`google_sync.py`)
+- **OAuth2 credentials**: chuyển từ Service Account sang OAuth2 (SA không có storage quota)
+  - Ưu tiên `google_oauth_credentials.json`, fallback `service_account.json`
+  - Env vars: `GOOGLE_OAUTH_CREDENTIALS` (mới) + `GOOGLE_SERVICE_ACCOUNT_KEY` (fallback)
+  - Token lưu tại `_google_token.json`, tự refresh khi hết hạn
 - **Batch file listing**: `_list_existing_files_recursive()` thay N+1 per-file queries
 - **File size check**: detect file upload dở/corrupt → auto delete + re-upload
 - **Non-resumable upload**: files < 5MB dùng non-resumable (fix empty files trên Drive)
-- **Scope upgrade**: `drive.file` → `drive` — fix lỗi upload vào shared folder
 - **Upload verification**: request `id,size` fields sau upload, log warning nếu size mismatch
 - **Diagnostic endpoint**: `GET /api/gdrive/test` — test upload 1 file + trả kết quả chi tiết
 
@@ -52,9 +55,9 @@ Tất cả thay đổi đáng chú ý của dự án được ghi nhận tại �
 
 #### Google Drive Upload (`google_sync.py`)
 - **Fix empty folders**: sub-folders tạo được nhưng files bên trong rỗng
-  - Root cause 1: scope `drive.file` chỉ cho phép truy cập files do app tạo → đổi sang `drive`
-  - Root cause 2: `resumable=True` cho mọi file có thể fail silently → dùng `resumable=False` cho < 5MB
-  - Fix: progress callback chỉ gọi khi upload thành công → giờ gọi cho MỌI file (upload/skip/error)
+  - Root cause: Service Account không có storage quota (HTTP 403 storageQuotaExceeded)
+  - Fix: chuyển sang OAuth2 credentials → upload dùng quota của user đã đăng nhập
+  - Bổ sung: `resumable=False` cho files < 5MB, progress callback cho MỌI file
 
 #### Multi-Ticker Scraper (`cafef_scraper.py`)
 - **Fix HHV contamination**: ticker lạ (HHV) xuất hiện ở đầu mỗi group vì DOM chưa update sau search

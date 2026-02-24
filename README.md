@@ -182,9 +182,9 @@ Sync Drive/Sheet chạy trong background thread (daemon), **không phụ thuộc
 
 - **Concurrent**: Drive và Sheet chạy đồng thời, không chặn lẫn nhau
 - **Auto Sheet sync**: tự động sync Sheet sau khi scraping hoàn tất (nếu có file mới)
+- **OAuth2 credentials**: ưu tiên OAuth (user quota), fallback Service Account (chỉ Shared Drives)
 - **Drive**: batch listing, so sánh file size detect corrupt, non-resumable cho < 5MB
 - **Sheet**: hash-based incremental — skip nếu data không thay đổi
-- **Scope**: sử dụng `drive` scope (full access) — required cho service account truy cập shared folder
 - **Tiến trình chi tiết**: broadcast qua WebSocket (`type: sync_progress`)
   - Hiển thị sub-folder + filename đang sync: `☁ Drive sync: [0570] report.pdf`
   - Counts + ETA: `45/200 — ↑12 ⏭33 | ETA: 2m30s`

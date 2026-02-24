@@ -717,19 +717,27 @@ async def run_cleanup(_: bool = Depends(require_admin)):
 
 def _check_google_drive_config():
     """Validate Google Drive config before sync."""
-    creds_path = os.getenv("GOOGLE_SERVICE_ACCOUNT_KEY", "./google_oauth_credentials.json")
+    oauth_path = os.getenv("GOOGLE_OAUTH_CREDENTIALS", "./google_oauth_credentials.json")
+    sa_path = os.getenv("GOOGLE_SERVICE_ACCOUNT_KEY", "./service_account.json")
     folder_id = os.getenv("GOOGLE_DRIVE_FOLDER_ID", "")
-    if not Path(creds_path).exists():
-        raise ValueError(f"File credentials không tồn tại: {creds_path}. Cấu hình GOOGLE_SERVICE_ACCOUNT_KEY trong .env")
+    if not Path(oauth_path).exists() and not Path(sa_path).exists():
+        raise ValueError(
+            f"Không tìm thấy credentials: {oauth_path} hoặc {sa_path}. "
+            f"Đặt google_oauth_credentials.json vào thư mục root."
+        )
     if not folder_id:
         raise ValueError("Chưa cấu hình GOOGLE_DRIVE_FOLDER_ID trong .env")
 
 
 def _check_google_sheet_config():
     """Validate Google Sheet config before sync."""
-    creds_path = os.getenv("GOOGLE_SERVICE_ACCOUNT_KEY", "./google_oauth_credentials.json")
-    if not Path(creds_path).exists():
-        raise ValueError(f"File credentials không tồn tại: {creds_path}. Cấu hình GOOGLE_SERVICE_ACCOUNT_KEY trong .env")
+    oauth_path = os.getenv("GOOGLE_OAUTH_CREDENTIALS", "./google_oauth_credentials.json")
+    sa_path = os.getenv("GOOGLE_SERVICE_ACCOUNT_KEY", "./service_account.json")
+    if not Path(oauth_path).exists() and not Path(sa_path).exists():
+        raise ValueError(
+            f"Không tìm thấy credentials: {oauth_path} hoặc {sa_path}. "
+            f"Đặt google_oauth_credentials.json vào thư mục root."
+        )
 
 
 @app.post("/api/gdrive/sync")
