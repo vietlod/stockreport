@@ -637,8 +637,14 @@ class CafeFScraper:
         log.info(f"  [{index+1}] {stock} | ICB:{icb_code} | {quarter_year} | {report_abbr}")
         log.info(f"  Cells: {entry.get('cells', [])[:4]}")
 
-        # Filter theo STOCK_CODE nếu có (hỗ trợ nhiều mã: ACB,FPT,VNM)
-        if STOCK_CODE and stock:
+        # Filter theo current_ticker trong multi-ticker mode
+        # Ưu tiên so khớp chính xác với ticker đang search (tránh entries lạ từ DOM cũ)
+        if self.current_ticker and stock:
+            if stock.upper() != self.current_ticker.upper():
+                self.filtered_stock += 1
+                log.info(f"  ⏭ Bỏ qua {stock} (đang search: {self.current_ticker})")
+                return
+        elif STOCK_CODE and stock:
             allowed = {s.strip().upper() for s in STOCK_CODE.split(",") if s.strip()}
             if allowed and stock.upper() not in allowed:
                 self.filtered_stock += 1
@@ -711,6 +717,9 @@ class CafeFScraper:
     def _search_ticker_on_cafef(self, page, ticker: str) -> dict:
         """Dùng CafeF IformationDisclosure search để filter theo 1 mã CK.
 
+        Sau khi gọi handleFindDisclosure(), polling DOM đợi bảng cập nhật
+        dữ liệu đúng ticker (tránh đọc dữ liệu cũ/stale).
+
         Returns cbtt_info dict sau khi search.
         """
         try:
@@ -719,7 +728,45 @@ class CafeFScraper:
                 IformationDisclosure.handleFindDisclosure();
             """)
             log.info(f"  ✏ Đã filter theo mã CK: {ticker}")
-            page.wait_for_timeout(3000)
+
+            # Polling DOM: đợi dòng đầu tiên trong bảng hiển thị đúng ticker
+            # Timeout 10s — CafeF AJAX thường trả về trong 2-5s
+            matched = page.evaluate(f"""(ticker) => {{
+                return new Promise((resolve) => {{
+                    let elapsed = 0;
+                    const maxWait = 10000;
+                    const interval = 500;
+                    const check = () => {{
+                        const rows = document.querySelectorAll('table tbody tr');
+                        for (let i = 0; i < rows.length; i++) {{
+                            const cells = rows[i].querySelectorAll('td');
+                            if (cells.length >= 3) {{
+                                const code = cells[0].textContent.trim().toUpperCase();
+                                if (code === ticker.toUpperCase()) {{
+                                    resolve(true);
+                                    return;
+                                }}
+                                break;  // chỉ check dòng data đầu tiên
+                            }}
+                        }}
+                        elapsed += interval;
+                        if (elapsed >= maxWait) {{
+                            resolve(false);
+                        }} else {{
+                            setTimeout(check, interval);
+                        }}
+                    }};
+                    // Đợi 1s trước khi bắt đầu poll (cho AJAX gửi đi)
+                    setTimeout(check, 1000);
+                }});
+            }}""", ticker)
+
+            if matched:
+                log.info(f"  ✅ DOM đã cập nhật dữ liệu cho {ticker}")
+            else:
+                log.warning(f"  ⚠ Timeout chờ DOM cập nhật cho {ticker}, tiếp tục...")
+                page.wait_for_timeout(2000)  # Fallback wait thêm
+
             cbtt_info = self._wait_for_cbtt_module(page, timeout_ms=5000)
             if cbtt_info.get("exists"):
                 log.info(f"  📊 Kết quả cho {ticker}: {cbtt_info['totalPage']} trang")
@@ -756,6 +803,18 @@ class CafeFScraper:
 
             if not entries:
                 log.warning(f"   Không tìm thấy entries trên trang {page_num}. Dừng.")
+                break
+
+            # Pre-filter: loại bỏ entries không khớp current_ticker (tránh stale data)
+            if self.current_ticker:
+                filtered = [e for e in entries if e.get("stock_code", "").upper() == self.current_ticker.upper()]
+                stale = len(entries) - len(filtered)
+                if stale > 0:
+                    log.info(f"   🧹 Lọc bỏ {stale} entries không khớp {self.current_ticker}")
+                entries = filtered
+
+            if not entries:
+                log.warning(f"   Không có entries khớp {self.current_ticker} trên trang {page_num}. Dừng.")
                 break
 
             self.entries.extend(entries)

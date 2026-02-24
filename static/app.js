@@ -715,7 +715,10 @@ function handleProgress(data) {
     if (ds > 0) statsText += ` | Drive: ${ds}`;
     if (data.total_tickers > 1) statsText += ` | Tickers: ${data.ticker_index}/${data.total_tickers}`;
     if (fs > 0 || ft > 0) {
-        statsText += ` | Lọc bỏ: ${fs} (mã) + ${ft} (thời gian)`;
+        let parts = [];
+        if (fs > 0) parts.push(`${fs} mã`);
+        if (ft > 0) parts.push(`${ft} thời gian`);
+        statsText += ` | Lọc: ${parts.join(' + ')}`;
     }
     document.getElementById('progressStats').textContent = statsText;
 

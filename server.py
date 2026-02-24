@@ -262,22 +262,51 @@ scrape_job = ScrapeJob()
 # ── Sync Job State (Google Drive / Sheet) ───────────────────────────────────
 
 class SyncJob:
-    """Background sync job — chạy trong daemon thread, không phụ thuộc browser."""
+    """Background sync job — Drive và Sheet chạy độc lập, đồng thời."""
 
     def __init__(self):
-        self.running = False
-        self.sync_type = ""  # "drive" | "sheet"
-        self.progress = {}
-        self.thread = None
+        # Trạng thái riêng biệt cho Drive và Sheet
+        self._drive_running = False
+        self._drive_progress = {}
+        self._drive_thread = None
+
+        self._sheet_running = False
+        self._sheet_progress = {}
+        self._sheet_thread = None
+
         self.loop = None
 
+    # ── Public properties (backward compat) ──
+
+    @property
+    def running(self):
+        return self._drive_running or self._sheet_running
+
+    @property
+    def sync_type(self):
+        parts = []
+        if self._drive_running:
+            parts.append("drive")
+        if self._sheet_running:
+            parts.append("sheet")
+        return "+".join(parts) if parts else ""
+
+    @property
+    def progress(self):
+        """Return progress cho sync đang chạy (ưu tiên drive nếu cả 2)."""
+        if self._drive_running:
+            return self._drive_progress
+        if self._sheet_running:
+            return self._sheet_progress
+        # Trả về progress gần nhất
+        return self._drive_progress or self._sheet_progress
+
     def start_drive(self, loop):
-        if self.running:
+        if self._drive_running:
             return False
-        self.running = True
-        self.sync_type = "drive"
+        self._drive_running = True
         self.loop = loop
-        self.progress = {
+        self._drive_progress = {
             "sync_type": "drive",
             "status": "running",
             "uploaded": 0,
@@ -287,28 +316,27 @@ class SyncJob:
             "current_file": "",
             "started_at": datetime.now().isoformat(),
         }
-        self.thread = threading.Thread(
+        self._drive_thread = threading.Thread(
             target=self._run_drive, daemon=True
         )
-        self.thread.start()
+        self._drive_thread.start()
         return True
 
     def start_sheet(self, loop):
-        if self.running:
+        if self._sheet_running:
             return False
-        self.running = True
-        self.sync_type = "sheet"
+        self._sheet_running = True
         self.loop = loop
-        self.progress = {
+        self._sheet_progress = {
             "sync_type": "sheet",
             "status": "running",
             "rows": 0,
             "started_at": datetime.now().isoformat(),
         }
-        self.thread = threading.Thread(
+        self._sheet_thread = threading.Thread(
             target=self._run_sheet, daemon=True
         )
-        self.thread.start()
+        self._sheet_thread.start()
         return True
 
     def _broadcast_sync(self, data: dict):
@@ -323,7 +351,7 @@ class SyncJob:
             sync = GoogleDriveSync()
 
             def on_progress(current, total, filename, stats):
-                self.progress.update({
+                self._drive_progress.update({
                     "uploaded": stats["uploaded"],
                     "skipped": stats["skipped"],
                     "errors": stats["errors"],
@@ -331,10 +359,10 @@ class SyncJob:
                     "current_file": filename,
                     "current_index": current,
                 })
-                self._broadcast_sync({"type": "sync_progress", **self.progress})
+                self._broadcast_sync({"type": "sync_progress", **self._drive_progress})
 
             stats = sync.upload_all(progress_callback=on_progress)
-            self.progress.update({
+            self._drive_progress.update({
                 "status": "completed",
                 "uploaded": stats["uploaded"],
                 "skipped": stats["skipped"],
@@ -343,19 +371,19 @@ class SyncJob:
                 "completed_at": datetime.now().isoformat(),
             })
         except Exception as e:
-            self.progress["status"] = "error"
-            self.progress["error"] = str(e)
+            self._drive_progress["status"] = "error"
+            self._drive_progress["error"] = str(e)
             log.error(f"Drive sync error: {e}", exc_info=True)
         finally:
-            self.running = False
-            self._broadcast_sync({"type": "sync_progress", **self.progress})
+            self._drive_running = False
+            self._broadcast_sync({"type": "sync_progress", **self._drive_progress})
 
     def _run_sheet(self):
         try:
             from google_sync import GoogleSheetSync
             sync = GoogleSheetSync()
             result = sync.sync()
-            self.progress.update({
+            self._sheet_progress.update({
                 "status": "completed",
                 "rows": result.get("rows", 0),
                 "skipped": result.get("skipped", False),
@@ -363,12 +391,12 @@ class SyncJob:
                 "completed_at": datetime.now().isoformat(),
             })
         except Exception as e:
-            self.progress["status"] = "error"
-            self.progress["error"] = str(e)
+            self._sheet_progress["status"] = "error"
+            self._sheet_progress["error"] = str(e)
             log.error(f"Sheet sync error: {e}", exc_info=True)
         finally:
-            self.running = False
-            self._broadcast_sync({"type": "sync_progress", **self.progress})
+            self._sheet_running = False
+            self._broadcast_sync({"type": "sync_progress", **self._sheet_progress})
 
 
 sync_job = SyncJob()
@@ -688,7 +716,7 @@ async def gdrive_sync(_: bool = Depends(require_admin)):
         if not started:
             return JSONResponse(
                 status_code=409,
-                content={"error": f"Sync đang chạy ({sync_job.sync_type}). Vui lòng đợi hoàn tất."}
+                content={"error": "Drive sync đang chạy. Vui lòng đợi hoàn tất."}
             )
         return {"status": "started", "sync_type": "drive"}
     except ValueError as e:
@@ -714,7 +742,7 @@ async def gsheet_sync(_: bool = Depends(require_admin)):
         if not started:
             return JSONResponse(
                 status_code=409,
-                content={"error": f"Sync đang chạy ({sync_job.sync_type}). Vui lòng đợi hoàn tất."}
+                content={"error": "Sheet sync đang chạy. Vui lòng đợi hoàn tất."}
             )
         return {"status": "started", "sync_type": "sheet"}
     except ValueError as e:
@@ -728,11 +756,12 @@ async def gsheet_sync(_: bool = Depends(require_admin)):
 
 @app.get("/api/sync/status")
 async def sync_status():
-    """Trạng thái sync hiện tại (Drive hoặc Sheet)."""
+    """Trạng thái sync hiện tại (Drive và/hoặc Sheet)."""
     return {
         "running": sync_job.running,
         "sync_type": sync_job.sync_type,
-        **sync_job.progress,
+        "drive": sync_job._drive_progress if sync_job._drive_progress else None,
+        "sheet": sync_job._sheet_progress if sync_job._sheet_progress else None,
     }
 
 

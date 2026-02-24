@@ -16,9 +16,10 @@ Tất cả thay đổi đáng chú ý của dự án được ghi nhận tại �
 
 #### Background Sync (`server.py`)
 - **SyncJob class**: chạy Drive/Sheet sync trong daemon thread, độc lập browser
+- **Concurrent**: Drive và Sheet chạy đồng thời, không chặn lẫn nhau
 - Endpoint trả response ngay (`{"status": "started"}`), sync tiếp tục chạy nền
 - Broadcast tiến trình qua WebSocket (`type: sync_progress`)
-- `GET /api/sync/status` — poll trạng thái sync
+- `GET /api/sync/status` — trả trạng thái cả Drive và Sheet
 
 ### 🔧 Cải tiến
 
@@ -34,6 +35,15 @@ Tất cả thay đổi đáng chú ý của dự án được ghi nhận tại �
 - **Header**: user avatar + dropdown menu (thay nút Logout)
 - **Settings modal**: glassmorphism overlay, slide-up animation
 - **WebSocket sync progress**: live toast notifications cho Drive upload + Sheet sync
+
+### 🐛 Bugfixes
+
+#### Multi-Ticker Scraper (`cafef_scraper.py`)
+- **Fix HHV contamination**: ticker lạ (HHV) xuất hiện ở đầu mỗi group vì DOM chưa update sau search
+  - DOM polling: đợi bảng CBTT hiển thị đúng ticker (max 10s) trước khi extract
+  - Pre-filter entries tại `_scrape_pages()`: loại bỏ stale entries không khớp `current_ticker`
+  - Filter `_process_entry()`: so khớp `self.current_ticker` thay vì toàn bộ group list
+- Cải thiện hiển thị "Lọc bỏ" — chỉ hiện filter counts khác 0
 
 ---
 

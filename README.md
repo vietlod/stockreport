@@ -180,9 +180,32 @@ Module `cleanup.py` tự động xóa files PDF hết hạn retention.
 
 Sync Drive/Sheet chạy trong background thread (daemon), **không phụ thuộc browser tab**:
 
+- **Concurrent**: Drive và Sheet chạy đồng thời, không chặn lẫn nhau
 - **Drive**: batch listing thay vì N+1 queries, so sánh file size detect corrupt
 - **Sheet**: hash-based incremental — skip nếu data không thay đổi
 - **Tiến trình**: broadcast qua WebSocket (`type: sync_progress`)
+- **Status API**: `GET /api/sync/status` trả trạng thái cả Drive và Sheet
+
+## Multi-Ticker Scraping
+
+Scraper hỗ trợ 3 chế độ:
+
+| Chế độ | `STOCK_CODE` | Hành vi |
+|--------|-------------|---------|
+| Tất cả | _(rỗng)_ | Scrape toàn bộ CBTT mặc định |
+| Single | `ACB` | Search 1 mã → scrape tất cả trang |
+| Multi | `BSR,OIL,PLX` | Lần lượt search từng mã → scrape |
+
+**Cơ chế search**: Sử dụng CafeF `IformationDisclosure` JS API:
+```javascript
+IformationDisclosure.refInputAC.value = "BSR";
+IformationDisclosure.handleFindDisclosure();
+```
+
+**Bảo vệ 3 lớp** chống dữ liệu lạ (stale DOM):
+1. **DOM Polling**: Sau khi search, polling bảng HTML mỗi 500ms (max 10s) đợi dòng đầu hiển thị đúng ticker
+2. **Pre-filter**: Entries extracted được lọc — chỉ giữ `stock_code == current_ticker`
+3. **Safety net**: `_process_entry()` so khớp chính xác `self.current_ticker`
 
 ## License
 
