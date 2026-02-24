@@ -387,6 +387,7 @@ async function startScrape() {
     if (resp && resp.status === 'started') {
         lastProgressStatus = 'starting';
         lastLoggedEntry = '';
+        lastDownloadedForStats = -1;
         document.getElementById('progressCard').style.display = '';
         document.getElementById('btnScrape').disabled = true;
         document.getElementById('btnStop').disabled = false;
@@ -576,6 +577,7 @@ function stopPolling() {
 
 let lastProgressStatus = '';
 let lastLoggedEntry = '';
+let lastDownloadedForStats = -1;
 
 function handleProgress(data) {
     const card = document.getElementById('progressCard');
@@ -600,11 +602,24 @@ function handleProgress(data) {
     // Stats - luôn hiển thị từ data
     const d = data.downloaded ?? 0, s = data.skipped ?? 0, f = data.failed ?? 0;
     const fs = data.filtered_stock ?? 0, ft = data.filtered_time ?? 0;
+    const ds = data.drive_synced ?? 0;
     let statsText = `Tải: ${d} | Bỏ qua: ${s} | Lỗi: ${f}`;
+    if (ds > 0) statsText += ` | Drive: ${ds}`;
     if (fs > 0 || ft > 0) {
         statsText += ` | Lọc bỏ: ${fs} (mã) + ${ft} (thời gian)`;
     }
     document.getElementById('progressStats').textContent = statsText;
+
+    // Cập nhật header + bảng thống kê tức thì khi có dữ liệu mới
+    if (data.stats_summary) {
+        document.getElementById('statFiles').textContent = data.stats_summary.total_files ?? 0;
+        document.getElementById('statStocks').textContent = data.stats_summary.unique_stocks ?? 0;
+        document.getElementById('statSize').textContent = data.stats_summary.total_size_mb ?? 0;
+    }
+    if (data.status === 'running' && d > lastDownloadedForStats) {
+        lastDownloadedForStats = d;
+        loadStats();
+    }
 
     // Log entry - chỉ thêm khi khác entry trước (tránh lặp do polling)
     if (data.current_entry && data.current_entry !== lastLoggedEntry) {

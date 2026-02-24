@@ -117,6 +117,7 @@ class ScrapeJob:
             "failed": 0,
             "filtered_stock": 0,
             "filtered_time": 0,
+            "drive_synced": 0,
             "current_entry": "",
             "started_at": datetime.now().isoformat(),
         }
@@ -139,6 +140,7 @@ class ScrapeJob:
     def _run_scrape(self, config: dict):
         """Run the scraper in a background thread."""
         scraper = None
+        drive_sync_count = [0]
         try:
             # Dynamically import to avoid circular deps
             import importlib
@@ -161,7 +163,24 @@ class ScrapeJob:
 
             scraper = scraper_module.CafeFScraper()
 
-            # Monkey-patch _process_entry to emit progress
+            # Drive sync real-time: upload mỗi file ngay sau khi tải
+            drive_sync = None
+            if os.getenv("GOOGLE_DRIVE_FOLDER_ID"):
+                try:
+                    from google_sync import GoogleDriveSync
+                    drive_sync = GoogleDriveSync()
+                    log.info("☁ Drive sync real-time: enabled")
+                except Exception as e:
+                    log.warning(f"☁ Drive sync disabled: {e}")
+
+            def on_download(dest):
+                if drive_sync and dest.exists():
+                    if drive_sync.upload_single(dest):
+                        drive_sync_count[0] += 1
+
+            scraper.on_download_callback = on_download
+
+            # Monkey-patch _process_entry to emit progress + stats
             original_process = scraper._process_entry
 
             def patched_process(page, entry, index):
@@ -176,6 +195,10 @@ class ScrapeJob:
                 self.progress["failed"] = scraper.failed
                 self.progress["filtered_stock"] = scraper.filtered_stock
                 self.progress["filtered_time"] = scraper.filtered_time
+                self.progress["drive_synced"] = drive_sync_count[0]
+                summary = get_stats_summary_sync()
+                if summary:
+                    self.progress["stats_summary"] = summary
                 self._broadcast_sync({"type": "progress", **self.progress})
 
             scraper._process_entry = patched_process
@@ -200,6 +223,8 @@ class ScrapeJob:
             self.progress["failed"] = scraper.failed
             self.progress["filtered_stock"] = scraper.filtered_stock
             self.progress["filtered_time"] = scraper.filtered_time
+            self.progress["drive_synced"] = drive_sync_count[0]
+            self.progress["stats_summary"] = get_stats_summary_sync()
             self.progress["status"] = "completed"
             self.progress["completed_at"] = datetime.now().isoformat()
 
@@ -209,6 +234,8 @@ class ScrapeJob:
             self.progress["failed"] = scraper.failed
             self.progress["filtered_stock"] = scraper.filtered_stock
             self.progress["filtered_time"] = scraper.filtered_time
+            self.progress["drive_synced"] = drive_sync_count[0]
+            self.progress["stats_summary"] = get_stats_summary_sync()
             self.progress["status"] = "stopped"
         except Exception as e:
             self.progress["downloaded"] = scraper.downloaded if scraper else 0
@@ -216,6 +243,8 @@ class ScrapeJob:
             self.progress["failed"] = scraper.failed if scraper else 0
             self.progress["filtered_stock"] = scraper.filtered_stock if scraper else 0
             self.progress["filtered_time"] = scraper.filtered_time if scraper else 0
+            self.progress["drive_synced"] = drive_sync_count[0]
+            self.progress["stats_summary"] = get_stats_summary_sync()
             self.progress["status"] = "error"
             self.progress["error"] = str(e)
             log.error(f"Scrape error: {e}", exc_info=True)
@@ -233,6 +262,27 @@ def get_db():
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
     return conn
+
+
+def get_stats_summary_sync() -> dict:
+    """Lấy summary thống kê từ DB (sync, dùng trong thread)."""
+    conn = get_db()
+    if not conn:
+        return {}
+    try:
+        row = conn.execute(
+            "SELECT COUNT(*) as total, COUNT(DISTINCT stock_code) as unique_stocks, "
+            "SUM(file_size) as total_size FROM downloads"
+        ).fetchone()
+        if row and row["total"]:
+            return {
+                "total_files": row["total"],
+                "unique_stocks": row["unique_stocks"],
+                "total_size_mb": round((row["total_size"] or 0) / 1024 / 1024, 1),
+            }
+    finally:
+        conn.close()
+    return {}
 
 
 # ── API Routes ──────────────────────────────────────────────────────────────

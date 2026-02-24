@@ -418,6 +418,7 @@ class CafeFScraper:
         self.filtered_stock = 0   # Bỏ qua vì không trong danh sách mã chọn
         self.filtered_time = 0    # Bỏ qua vì ngoài khoảng thời gian
         self.history = DownloadHistory(PDF_DIR)
+        self.on_download_callback = None  # Optional: (dest: Path) -> None, gọi sau mỗi download thành công
 
     def _on_response(self, response):
         """Callback bắt network responses để tìm API endpoint."""
@@ -691,6 +692,11 @@ class CafeFScraper:
             )
             if status == "downloaded":
                 self.downloaded += 1
+                if self.on_download_callback:
+                    try:
+                        self.on_download_callback(dest)
+                    except Exception as e:
+                        log.warning(f"  ⚠ on_download_callback error: {e}")
                 # Rate limiting: delay giữa các download
                 time.sleep(DOWNLOAD_DELAY)
             elif status == "skipped":

@@ -1,8 +1,11 @@
 """
-Google Drive & Sheets Integration (OAuth2)
-==========================================
+Google Drive & Sheets Integration
+=================================
 Upload PDFs to Google Drive, sync metadata to Google Sheets.
-Uses OAuth2 Client credentials (web type) — requires one-time user consent.
+
+Supports:
+  - Service Account (service_account.json): no browser, share Drive folder with client_email
+  - OAuth2 (web/installed): one-time browser consent, token saved locally
 
 Usage:
     from google_sync import GoogleDriveSync, GoogleSheetSync
@@ -41,33 +44,51 @@ SCOPES = [
 ]
 
 
+def _is_service_account_file(path: str) -> bool:
+    """Check if credentials file is Service Account format."""
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data.get("type") == "service_account"
+    except (json.JSONDecodeError, OSError):
+        return False
+
+
 def _get_credentials():
-    """Get or refresh OAuth2 credentials.
+    """Get credentials: Service Account (no consent) or OAuth2 (browser consent).
     
-    First time: opens browser for user consent → saves token.
-    Subsequent: loads saved token, refreshes if expired.
+    - Service Account: uses GOOGLE_SERVICE_ACCOUNT_KEY → service_account.json
+    - OAuth2: uses client secrets (web/installed) → token saved to _google_token.json
     """
+    creds_path = Path(CREDENTIALS_FILE)
+    if not creds_path.exists():
+        raise FileNotFoundError(
+            f"Google credentials file not found: {CREDENTIALS_FILE}\n"
+            f"Set GOOGLE_SERVICE_ACCOUNT_KEY in .env (Service Account) or use OAuth client secrets."
+        )
+
+    # Service Account: no browser, no token file
+    if _is_service_account_file(str(creds_path)):
+        from google.oauth2 import service_account
+        log.info("🔑 Using Service Account credentials")
+        return service_account.Credentials.from_service_account_file(
+            str(creds_path), scopes=SCOPES
+        )
+
+    # OAuth2 flow (web/installed app)
     from google.oauth2.credentials import Credentials
     from google_auth_oauthlib.flow import InstalledAppFlow
     from google.auth.transport.requests import Request
 
     creds = None
-
-    # Try loading saved token
     if TOKEN_FILE.exists():
         creds = Credentials.from_authorized_user_file(str(TOKEN_FILE), SCOPES)
 
-    # If no valid credentials, run OAuth2 flow
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             log.info("🔄 Refreshing Google OAuth token...")
             creds.refresh(Request())
         else:
-            if not Path(CREDENTIALS_FILE).exists():
-                raise FileNotFoundError(
-                    f"Google OAuth credentials file not found: {CREDENTIALS_FILE}\n"
-                    f"Set GOOGLE_SERVICE_ACCOUNT_KEY in .env to the correct path."
-                )
             log.info("🔑 Opening browser for Google OAuth consent...")
             flow = InstalledAppFlow.from_client_secrets_file(
                 CREDENTIALS_FILE, SCOPES,
@@ -75,7 +96,6 @@ def _get_credentials():
             )
             creds = flow.run_local_server(port=8080, open_browser=True)
 
-        # Save token for next time
         TOKEN_FILE.write_text(creds.to_json())
         log.info(f"💾 Token saved to {TOKEN_FILE}")
 
@@ -131,6 +151,39 @@ class GoogleDriveSync:
         query = f"name='{name}' and '{parent_id}' in parents and trashed=false"
         results = service.files().list(q=query, fields="files(id)").execute()
         return len(results.get("files", [])) > 0
+
+    def upload_single(self, pdf_path: Path) -> bool:
+        """Upload một file PDF lên Drive ngay sau khi tải xong.
+        
+        Returns: True nếu upload thành công hoặc file đã tồn tại, False nếu lỗi.
+        """
+        if not DRIVE_FOLDER_ID:
+            return False
+        try:
+            from googleapiclient.http import MediaFileUpload
+            service = self._service()
+            if pdf_path.parent != PDF_DIR:
+                icb_folder = pdf_path.parent.name
+                parent_id = self._get_or_create_folder(
+                    service, icb_folder, DRIVE_FOLDER_ID
+                )
+            else:
+                parent_id = DRIVE_FOLDER_ID
+            filename = pdf_path.name
+            if self._file_exists(service, filename, parent_id):
+                return True
+            media = MediaFileUpload(
+                str(pdf_path), mimetype="application/pdf", resumable=True
+            )
+            service.files().create(
+                body={"name": filename, "parents": [parent_id]},
+                media_body=media, fields="id"
+            ).execute()
+            log.info(f"  ☁ [{filename}] → Drive")
+            return True
+        except Exception as e:
+            log.warning(f"  ⚠ Drive upload failed for {pdf_path.name}: {e}")
+            return False
 
     def upload_all(self, progress_callback=None) -> dict:
         """Upload all PDFs from PDF_DIR to Google Drive.
