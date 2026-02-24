@@ -38,6 +38,14 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     if (state.adminToken) {
         showApp();
+        const params = new URLSearchParams(location.search);
+        if (params.get('oauth') === 'success') {
+            toast('✅ Đã kết nối Google Drive. Bạn có thể Sync Drive.', 'success');
+            history.replaceState({}, '', '/');
+        } else if (params.get('oauth') === 'error') {
+            toast('❌ Lỗi kết nối Google: ' + (params.get('msg') || 'Unknown'), 'error');
+            history.replaceState({}, '', '/');
+        }
     } else {
         document.getElementById('loginScreen').classList.add('visible');
     }
@@ -466,17 +474,41 @@ async function buildScrapeConfig() {
 
 // ── Google Sync ────────────────────────────────────────────────────────────
 async function syncDrive() {
+    const status = await api('/api/oauth2/status');
+    if (status && !status.connected) {
+        toast('Chưa kết nối Google Drive. Đang chuyển đến trang cấp quyền...', 'info');
+        startOAuthFlow('drive');
+        return;
+    }
     toast('Đang khởi tạo sync Drive...', 'info');
     const resp = await api('/api/gdrive/sync', { method: 'POST' }, true);
     if (!resp) return;
     if (resp.status === 'started') {
         toast('☁ Sync Drive đang chạy nền. Có thể đóng tab.', 'info');
+    } else if ((resp.error || '').includes('Chưa có Google OAuth token')) {
+        startOAuthFlow('drive');
     } else {
         toast(resp.error || 'Lỗi upload', 'error');
     }
 }
 
+async function startOAuthFlow(forWhat = 'drive') {
+    const data = await api('/api/oauth2/start', {}, true);
+    if (data?.url) {
+        toast('Đang chuyển đến Google để cấp quyền...', 'info');
+        window.location.href = data.url;
+    } else {
+        toast(data?.detail || 'Lỗi OAuth', 'error');
+    }
+}
+
 async function syncSheet() {
+    const status = await api('/api/oauth2/status');
+    if (status && !status.connected) {
+        toast('Chưa kết nối Google. Đang chuyển đến trang cấp quyền...', 'info');
+        startOAuthFlow('sheet');
+        return;
+    }
     toast('Đang khởi tạo sync Sheet...', 'info');
     const resp = await api('/api/gsheet/sync', { method: 'POST' }, true);
     if (!resp) return;
@@ -848,7 +880,13 @@ function handleSyncProgress(data) {
         }
         lastSyncStatus = '';
     } else if (st === 'error') {
-        toast(`❌ Sync lỗi: ${data.error || 'Unknown'}`, 'error');
+        const err = data.error || 'Unknown';
+        if ((err + '').includes('Chưa có Google OAuth token')) {
+            toast('Chưa kết nối Google Drive. Đang chuyển đến trang cấp quyền...', 'info');
+            startOAuthFlow('drive');
+        } else {
+            toast(`❌ Sync lỗi: ${err}`, 'error');
+        }
         lastSyncStatus = '';
     }
 }

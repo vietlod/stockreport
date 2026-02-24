@@ -35,7 +35,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query, Depends, HTTPException
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials, APIKeyHeader
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 import uvicorn
 
 # ── Admin Auth ──────────────────────────────────────────────────────────────
@@ -711,6 +711,46 @@ async def run_cleanup(_: bool = Depends(require_admin)):
     except Exception as e:
         log.error(f"Manual cleanup error: {e}", exc_info=True)
         return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+# ── Google OAuth (Web flow for production) ───────────────────────────────────
+
+@app.get("/api/oauth2/start")
+async def oauth2_start(_: bool = Depends(require_admin)):
+    """Trả URL để redirect user đến Google consent. Production: https://stockreport.khoviet.com/oauth2callback"""
+    try:
+        from google_sync import get_oauth_authorization_url
+        url = get_oauth_authorization_url()
+        return {"url": url}
+    except Exception as e:
+        log.error(f"OAuth start error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/oauth2callback")
+async def oauth2_callback(code: str = Query(None), error: str = Query(None)):
+    """Nhận callback từ Google, lưu token, redirect về /"""
+    from urllib.parse import quote
+    if error:
+        log.warning(f"OAuth callback error: {error}")
+        return RedirectResponse(url="/?oauth=error&msg=" + quote(error, safe=""), status_code=302)
+    if not code:
+        return RedirectResponse(url="/?oauth=error&msg=no_code", status_code=302)
+    try:
+        from google_sync import save_oauth_token_from_callback
+        save_oauth_token_from_callback(code)
+        return RedirectResponse(url="/?oauth=success", status_code=302)
+    except Exception as e:
+        log.error(f"OAuth callback save error: {e}", exc_info=True)
+        return RedirectResponse(url="/?oauth=error&msg=" + quote(str(e)[:80], safe=""), status_code=302)
+
+
+@app.get("/api/oauth2/status")
+async def oauth2_status():
+    """Kiểm tra đã có token chưa."""
+    from pathlib import Path
+    token_file = Path(__file__).parent / "_google_token.json"
+    return {"connected": token_file.exists()}
 
 
 # ── Google Integration ──────────────────────────────────────────────────────

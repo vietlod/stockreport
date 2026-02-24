@@ -72,14 +72,14 @@ GOOGLE_SHEET_FOLDER_ID=<your-folder-id>
 
 File `google_oauth_credentials.json` là OAuth2 Client credentials (web type).
 
-**Flow lần đầu:**
-1. Restart server → gọi Sync Drive (hoặc `GET /api/gdrive/test`)
-2. Browser mở trang Google consent
+**Flow lần đầu (production):**
+1. Mở https://stockreport.khoviet.com → đăng nhập admin
+2. Bấm **Sync Drive** → redirect đến Google consent
 3. Đăng nhập Google account có quyền truy cập Drive folder
-4. Cho phép (Allow) → token tự lưu vào `_google_token.json`
-5. Lần sau không cần consent lại (token tự refresh)
+4. Cho phép (Allow) → redirect về app, token lưu `_google_token.json`
+5. Lần sau không cần consent (token tự refresh)
 
-> **VPS:** Chạy consent flow trên máy local (có browser), rồi copy `_google_token.json` lên VPS.
+**Redirect URI** trong Google Cloud Console: `https://stockreport.khoviet.com/oauth2callback`
 
 ## Chạy ứng dụng
 

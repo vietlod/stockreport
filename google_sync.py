@@ -30,6 +30,7 @@ log = logging.getLogger("google_sync")
 
 # ── Config ──────────────────────────────────────────────────────────────────
 OAUTH_CREDENTIALS_FILE = os.getenv("GOOGLE_OAUTH_CREDENTIALS", "./google_oauth_credentials.json")
+OAUTH_REDIRECT_URI = os.getenv("OAUTH_REDIRECT_URI", "https://stockreport.khoviet.com/oauth2callback")
 DRIVE_FOLDER_ID = os.getenv("GOOGLE_DRIVE_FOLDER_ID", "")
 SHEET_FOLDER_ID = os.getenv("GOOGLE_SHEET_FOLDER_ID", "")
 PDF_DIR = Path(os.getenv("PDF_DIR", "./pdf"))
@@ -53,7 +54,7 @@ def _is_service_account_file(path: str) -> bool:
 
 
 def _get_credentials():
-    """OAuth2 only. Lần đầu: mở browser consent → token lưu _google_token.json."""
+    """OAuth2. Lấy token từ file hoặc raise nếu cần consent (web flow qua /oauth2callback)."""
     oauth_path = Path(OAUTH_CREDENTIALS_FILE)
     if not oauth_path.exists():
         raise FileNotFoundError(
@@ -67,33 +68,61 @@ def _get_credentials():
         )
 
     from google.oauth2.credentials import Credentials
-    from google_auth_oauthlib.flow import InstalledAppFlow
     from google.auth.transport.requests import Request
 
-    creds = None
     if TOKEN_FILE.exists():
         try:
             creds = Credentials.from_authorized_user_file(str(TOKEN_FILE), SCOPES)
+            if creds.valid:
+                return creds
+            if creds.expired and creds.refresh_token:
+                log.info("🔄 Refreshing Google OAuth token...")
+                creds.refresh(Request())
+                TOKEN_FILE.write_text(creds.to_json())
+                return creds
         except Exception:
             log.warning("🔑 Token file hỏng, sẽ tạo mới")
             TOKEN_FILE.unlink(missing_ok=True)
 
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            log.info("🔄 Refreshing Google OAuth token...")
-            creds.refresh(Request())
-        else:
-            log.info("🔑 Opening browser for Google OAuth consent...")
-            flow = InstalledAppFlow.from_client_secrets_file(
-                str(oauth_path), SCOPES,
-                redirect_uri="http://localhost:8080"
-            )
-            creds = flow.run_local_server(port=8080, open_browser=True)
+    raise ValueError(
+        "Chưa có Google OAuth token. Bấm Sync Drive để bắt đầu consent flow."
+    )
 
-        TOKEN_FILE.write_text(creds.to_json())
-        log.info(f"💾 Token saved to {TOKEN_FILE}")
 
-    return creds
+def get_oauth_authorization_url() -> str:
+    """Trả URL để redirect user đến Google consent."""
+    from google_auth_oauthlib.flow import Flow
+
+    oauth_path = Path(OAUTH_CREDENTIALS_FILE)
+    if not oauth_path.exists():
+        raise FileNotFoundError(f"Không tìm thấy {OAUTH_CREDENTIALS_FILE}")
+    if _is_service_account_file(str(oauth_path)):
+        raise ValueError(f"{OAUTH_CREDENTIALS_FILE} phải là OAuth client (web type)")
+
+    flow = Flow.from_client_secrets_file(
+        str(oauth_path), SCOPES,
+        redirect_uri=OAUTH_REDIRECT_URI,
+    )
+    url, _ = flow.authorization_url(
+        access_type="offline",
+        prompt="consent",
+        include_granted_scopes="true",
+    )
+    return url
+
+
+def save_oauth_token_from_callback(code: str) -> None:
+    """Đổi authorization code lấy token, lưu vào _google_token.json."""
+    from google_auth_oauthlib.flow import Flow
+
+    oauth_path = Path(OAUTH_CREDENTIALS_FILE)
+    flow = Flow.from_client_secrets_file(
+        str(oauth_path), SCOPES,
+        redirect_uri=OAUTH_REDIRECT_URI,
+    )
+    flow.fetch_token(code=code)
+    TOKEN_FILE.write_text(flow.credentials.to_json())
+    log.info(f"💾 Token saved to {TOKEN_FILE}")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
