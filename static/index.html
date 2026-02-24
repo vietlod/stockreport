@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CafeF CBTT Report Manager</title>
+    <meta name="description" content="Quản lý tải báo cáo CBTT từ CafeF - Lọc theo mã, sàn, ngành ICB, chỉ số">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <!-- Header -->
+    <header class="header">
+        <div class="header-brand">
+            <div class="logo">
+                <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
+                    <rect width="32" height="32" rx="8" fill="url(#g1)"/>
+                    <path d="M8 22V10l8-4 8 4v12l-8 4-8-4z" stroke="#fff" stroke-width="1.5" fill="none"/>
+                    <path d="M16 6v20M8 10l8 4 8-4" stroke="#fff" stroke-width="1.5" opacity="0.6"/>
+                    <defs><linearGradient id="g1" x1="0" y1="0" x2="32" y2="32">
+                        <stop stop-color="#6366f1"/><stop offset="1" stop-color="#8b5cf6"/>
+                    </linearGradient></defs>
+                </svg>
+            </div>
+            <div>
+                <h1>CafeF CBTT</h1>
+                <span class="header-sub">Report Manager</span>
+            </div>
+        </div>
+        <div class="header-stats" id="headerStats">
+            <div class="stat-chip"><span class="stat-val" id="statFiles">-</span><span class="stat-label">Files</span></div>
+            <div class="stat-chip"><span class="stat-val" id="statStocks">-</span><span class="stat-label">Stocks</span></div>
+            <div class="stat-chip"><span class="stat-val" id="statSize">-</span><span class="stat-label">MB</span></div>
+        </div>
+    </header>
+
+    <main class="main">
+        <!-- Filter Panel -->
+        <section class="card filter-card">
+            <h2 class="card-title">
+                <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor"><path d="M2 4h16l-6 7v5l-4 2v-7L2 4z"/></svg>
+                Bộ lọc
+            </h2>
+
+            <div class="filter-tabs">
+                <button class="tab active" data-tab="ticker">Mã CK</button>
+                <button class="tab" data-tab="exchange">Sàn GD</button>
+                <button class="tab" data-tab="industry">Ngành ICB</button>
+                <button class="tab" data-tab="index">Chỉ số</button>
+            </div>
+
+            <div class="filter-content">
+                <!-- Tab: Ticker -->
+                <div class="tab-panel active" id="panel-ticker">
+                    <div class="input-group">
+                        <input type="text" id="tickerInput" placeholder="Nhập mã CK (VD: ACB, FPT, VNM...)" autocomplete="off">
+                        <div class="autocomplete-list" id="tickerAutocomplete"></div>
+                    </div>
+                    <div class="selected-tickers" id="selectedTickers"></div>
+                </div>
+                <!-- Tab: Exchange -->
+                <div class="tab-panel" id="panel-exchange">
+                    <div class="checkbox-grid" id="exchangeGrid"></div>
+                </div>
+                <!-- Tab: Industry -->
+                <div class="tab-panel" id="panel-industry">
+                    <select id="industrySelect" class="select-input" multiple size="8">
+                        <option value="">Chọn ngành ICB...</option>
+                    </select>
+                </div>
+                <!-- Tab: Index -->
+                <div class="tab-panel" id="panel-index">
+                    <div class="checkbox-grid" id="indexGrid"></div>
+                </div>
+            </div>
+
+            <!-- Time Range -->
+            <div class="time-range">
+                <h3 class="section-label">Khoảng thời gian</h3>
+                <div class="time-inputs">
+                    <div class="time-group">
+                        <label>Từ</label>
+                        <select id="fromYear" class="select-sm"></select>
+                        <select id="fromQuarter" class="select-sm">
+                            <option value="">Cả năm</option>
+                            <option value="Q1">Q1</option>
+                            <option value="Q2">Q2</option>
+                            <option value="Q3">Q3</option>
+                            <option value="Q4">Q4</option>
+                        </select>
+                    </div>
+                    <span class="time-sep">→</span>
+                    <div class="time-group">
+                        <label>Đến</label>
+                        <select id="toYear" class="select-sm"></select>
+                        <select id="toQuarter" class="select-sm">
+                            <option value="">Cả năm</option>
+                            <option value="Q1">Q1</option>
+                            <option value="Q2">Q2</option>
+                            <option value="Q3">Q3</option>
+                            <option value="Q4">Q4</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Actions -->
+            <div class="actions">
+                <button class="btn btn-primary" id="btnScrape" onclick="startScrape()">
+                    <svg width="18" height="18" viewBox="0 0 18 18" fill="currentColor"><path d="M2 2h6v6H2V2zm8 0h6v6h-6V2zM2 10h6v6H2v-6zm10 2a4 4 0 100-4 4 4 0 000 4z"/></svg>
+                    Bắt đầu tải
+                </button>
+                <button class="btn btn-secondary" id="btnStop" onclick="stopScrape()" disabled>
+                    Dừng
+                </button>
+                <button class="btn btn-accent" onclick="syncDrive()">
+                    <svg width="18" height="18" viewBox="0 0 18 18" fill="currentColor"><path d="M9 1l5 8H4L9 1zM3 11h5v6H3v-6zm7 0h5v6h-5v-6z"/></svg>
+                    Sync Drive
+                </button>
+                <button class="btn btn-accent" onclick="syncSheet()">
+                    <svg width="18" height="18" viewBox="0 0 18 18" fill="currentColor"><path d="M2 2h14v14H2V2zm2 4v8h10V6H4zm2 2h2v2H6V8zm4 0h2v2h-2V8zm-4 4h2v2H6v-2zm4 0h2v2h-2v-2z"/></svg>
+                    Sync Sheet
+                </button>
+            </div>
+        </section>
+
+        <!-- Progress Panel -->
+        <section class="card progress-card" id="progressCard" style="display:none">
+            <h2 class="card-title">
+                <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor"><path d="M10 2a8 8 0 100 16 8 8 0 000-16zm1 4v5l3 2-.7 1.2L9 12V6h2z"/></svg>
+                Tiến trình
+            </h2>
+            <div class="progress-bar-wrap">
+                <div class="progress-bar" id="progressBar" style="width:0%"></div>
+            </div>
+            <div class="progress-info">
+                <span id="progressText">Đang chờ...</span>
+                <span id="progressStats"></span>
+            </div>
+            <div class="log-stream" id="logStream"></div>
+        </section>
+
+        <!-- Stats Panel -->
+        <section class="card">
+            <h2 class="card-title">
+                <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor"><path d="M2 16h16v2H2v-2zm2-5h2v5H4v-5zm4-3h2v8H8V8zm4-4h2v12h-2V4zm4 2h2v10h-2V6z"/></svg>
+                Thống kê
+            </h2>
+            <div class="stats-tabs">
+                <button class="tab active" data-stab="exchange">Sàn GD</button>
+                <button class="tab" data-stab="industry">Ngành</button>
+                <button class="tab" data-stab="index">Chỉ số</button>
+            </div>
+            <div class="stats-content">
+                <table class="stats-table" id="statsTable">
+                    <thead><tr><th>Nhóm</th><th>Số file</th><th>Dung lượng</th></tr></thead>
+                    <tbody id="statsBody"></tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- History Table -->
+        <section class="card">
+            <h2 class="card-title">
+                <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor"><path d="M4 2h12a2 2 0 012 2v12a2 2 0 01-2 2H4a2 2 0 01-2-2V4a2 2 0 012-2zm0 4v10h12V6H4zm2 2h3v2H6V8zm5 0h3v2h-3V8zm-5 4h3v2H6v-2zm5 0h3v2h-3v-2z"/></svg>
+                Lịch sử tải
+            </h2>
+            <div class="history-controls">
+                <input type="text" id="historySearch" placeholder="Tìm theo mã CK..." class="search-input">
+                <span class="history-count" id="historyCount"></span>
+            </div>
+            <div class="table-wrap">
+                <table class="data-table" id="historyTable">
+                    <thead>
+                        <tr>
+                            <th>ICB</th>
+                            <th>Ticker</th>
+                            <th>Thời gian</th>
+                            <th>Loại</th>
+                            <th>Sàn</th>
+                            <th>Dung lượng</th>
+                            <th>Ngày tải</th>
+                        </tr>
+                    </thead>
+                    <tbody id="historyBody"></tbody>
+                </table>
+            </div>
+            <div class="pagination" id="historyPagination"></div>
+        </section>
+    </main>
+
+    <footer class="footer">
+        <span>CafeF CBTT Report Manager v1.0 — Built with FastAPI + Vanilla JS</span>
+    </footer>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

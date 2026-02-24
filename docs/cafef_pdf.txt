@@ -1,0 +1,21 @@
+Navigate to https://m.cafef.vn/du-lieu/cong-bo-thong-tin.chn and analyze the page structure. I need you to:
+
+1. First, load the page and wait for it to fully render.
+2. Examine the main content area - look for a table or list of "Công bố thông tin" (information disclosure) entries.
+3. For each entry/row, identify:
+   - What information is displayed (company name, date, title, etc.)
+   - Whether there are links to detail pages or direct PDF download links
+   - The URL pattern of those links
+4. Check if there's pagination (next page, page numbers, etc.) and how it works.
+5. Click on one of the entries/links to see where it goes - does it go to a detail page or directly to a PDF?
+6. If it goes to a detail page, look for the PDF download link on that page.
+7. Check the URL structure and patterns for the PDF files.
+8. Look at the page source or network requests to understand if data is loaded via API/AJAX calls.
+
+Return a detailed report with:
+- The HTML structure of the listing (table/div classes, link patterns)
+- The URL pattern for detail pages
+- The URL pattern for PDF files
+- How pagination works (URL params, AJAX, etc.)
+- Any API endpoints discovered
+- Example URLs for at least 2-3 entries and their corresponding PDF links

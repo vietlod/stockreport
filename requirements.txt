@@ -1,0 +1,10 @@
+playwright
+requests
+python-dotenv
+openpyxl
+fastapi
+uvicorn[standard]
+websockets
+google-api-python-client
+google-auth-httplib2
+google-auth-oauthlib
