@@ -383,6 +383,7 @@ async function startScrape() {
     });
 
     if (resp && resp.status === 'started') {
+        lastProgressStatus = 'starting';
         document.getElementById('progressCard').style.display = '';
         document.getElementById('btnScrape').disabled = true;
         document.getElementById('btnStop').disabled = false;
@@ -429,6 +430,17 @@ async function buildScrapeConfig() {
     if (tickerSet.size) {
         config.stock_code = [...tickerSet].join(',');
     }
+
+    // Khoảng thời gian
+    const fromYear = document.getElementById('fromYear')?.value;
+    const toYear = document.getElementById('toYear')?.value;
+    const fromQuarter = document.getElementById('fromQuarter')?.value;
+    const toQuarter = document.getElementById('toQuarter')?.value;
+    if (fromYear) config.from_year = parseInt(fromYear, 10);
+    if (toYear) config.to_year = parseInt(toYear, 10);
+    if (fromQuarter) config.from_quarter = fromQuarter;
+    if (toQuarter) config.to_quarter = toQuarter;
+
     return config;
 }
 
@@ -559,6 +571,8 @@ function stopPolling() {
     }
 }
 
+let lastProgressStatus = '';
+
 function handleProgress(data) {
     const card = document.getElementById('progressCard');
     card.style.display = '';
@@ -579,9 +593,10 @@ function handleProgress(data) {
     };
     document.getElementById('progressText').textContent = statusMap[data.status] || data.status;
 
-    // Stats
+    // Stats - luôn hiển thị từ data
+    const d = data.downloaded ?? 0, s = data.skipped ?? 0, f = data.failed ?? 0;
     document.getElementById('progressStats').textContent =
-        `Tải: ${data.downloaded || 0} | Bỏ qua: ${data.skipped || 0} | Lỗi: ${data.failed || 0}`;
+        `Tải: ${d} | Bỏ qua: ${s} | Lỗi: ${f}`;
 
     // Log entry
     if (data.current_entry) {
@@ -593,9 +608,15 @@ function handleProgress(data) {
         document.getElementById('btnScrape').disabled = false;
         document.getElementById('btnStop').disabled = true;
         document.getElementById('progressBar').style.width = '100%';
+        stopPolling();
         loadStats();
         loadHistory();
-        if (data.status === 'completed') toast('Scraping hoàn thành!', 'success');
+        if (data.status === 'completed' && lastProgressStatus !== 'completed') {
+            toast(`Scraping hoàn thành! Tải: ${d}, Bỏ qua: ${s}, Lỗi: ${f}`, 'success');
+        }
+        lastProgressStatus = data.status;
+    } else {
+        lastProgressStatus = data.status;
     }
 }
 

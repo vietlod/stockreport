@@ -34,6 +34,11 @@ load_dotenv()
 STOCK_CODE = os.getenv("STOCK_CODE", "").strip()
 MAX_PAGES = int(os.getenv("MAX_PAGES", "0"))  # 0 = fetch all pages
 PDF_DIR = Path(os.getenv("PDF_DIR", "./pdf"))
+# Lọc thời gian (từ config API, mặc định None = không lọc)
+TIME_FROM_YEAR = None
+TIME_FROM_QUARTER = ""
+TIME_TO_YEAR = None
+TIME_TO_QUARTER = ""
 HEADLESS = os.getenv("HEADLESS", "true").lower() == "true"
 PAGE_DELAY = float(os.getenv("PAGE_DELAY", "1.5"))  # delay giữa các trang (giây)
 DOWNLOAD_DELAY = float(os.getenv("DOWNLOAD_DELAY", "0.5"))  # delay giữa các PDF
@@ -179,6 +184,35 @@ def extract_quarter_year(date_str: str, report_text: str = "") -> str:
     elif result_year:
         return result_year
     return ""
+
+
+def _quarter_in_range(quarter_year: str) -> bool:
+    """Kiểm tra quarter_year có nằm trong khoảng TIME_FROM_* .. TIME_TO_* không."""
+    if not quarter_year or TIME_FROM_YEAR is None:
+        return True
+    qy = quarter_year.strip().upper()
+    year, quarter = 0, 0
+    if "Q" in qy:
+        parts = qy.split("Q")
+        year = int(parts[0]) if parts[0].isdigit() else 0
+        quarter = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
+    elif qy.isdigit():
+        year = int(qy)
+        quarter = 0
+    if year == 0:
+        return True
+    from_year = TIME_FROM_YEAR or 0
+    to_year = TIME_TO_YEAR or 9999
+    from_q = int(TIME_FROM_QUARTER.replace("Q", "")) if TIME_FROM_QUARTER else 1
+    to_q = int(TIME_TO_QUARTER.replace("Q", "")) if TIME_TO_QUARTER else 4
+    # So sánh: year*4 + quarter (Q1=1..Q4=4)
+    entry_val = year * 4 + (quarter if quarter else 1)
+    range_min = from_year * 4 + from_q
+    range_max = to_year * 4 + to_q
+    if quarter == 0:
+        entry_val = year * 4 + 1
+        return range_min <= year * 4 + 4 and range_max >= year * 4 + 1
+    return range_min <= entry_val <= range_max
 
 
 def sanitize_filename(name: str) -> str:
@@ -602,6 +636,11 @@ class CafeFScraper:
             if allowed and stock.upper() not in allowed:
                 log.info(f"  ⏭ Bỏ qua (không trong danh sách: {len(allowed)} mã)")
                 return
+
+        # Filter theo khoảng thời gian
+        if not _quarter_in_range(quarter_year):
+            log.info(f"  ⏭ Bỏ qua (ngoài khoảng thời gian: {quarter_year})")
+            return
 
         pdf_urls = list(entry.get("pdf_links", []))
 

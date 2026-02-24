@@ -136,6 +136,7 @@ class ScrapeJob:
 
     def _run_scrape(self, config: dict):
         """Run the scraper in a background thread."""
+        scraper = None
         try:
             # Dynamically import to avoid circular deps
             import importlib
@@ -150,6 +151,11 @@ class ScrapeJob:
 
             max_pages = config.get("max_pages", 0)
             scraper_module.MAX_PAGES = max_pages
+
+            scraper_module.TIME_FROM_YEAR = config.get("from_year")
+            scraper_module.TIME_FROM_QUARTER = config.get("from_quarter") or ""
+            scraper_module.TIME_TO_YEAR = config.get("to_year")
+            scraper_module.TIME_TO_QUARTER = config.get("to_quarter") or ""
 
             scraper = scraper_module.CafeFScraper()
 
@@ -185,12 +191,21 @@ class ScrapeJob:
 
             scraper.run()
 
+            self.progress["downloaded"] = scraper.downloaded
+            self.progress["skipped"] = scraper.skipped
+            self.progress["failed"] = scraper.failed
             self.progress["status"] = "completed"
             self.progress["completed_at"] = datetime.now().isoformat()
 
         except InterruptedError:
+            self.progress["downloaded"] = scraper.downloaded
+            self.progress["skipped"] = scraper.skipped
+            self.progress["failed"] = scraper.failed
             self.progress["status"] = "stopped"
         except Exception as e:
+            self.progress["downloaded"] = scraper.downloaded if scraper else 0
+            self.progress["skipped"] = scraper.skipped if scraper else 0
+            self.progress["failed"] = scraper.failed if scraper else 0
             self.progress["status"] = "error"
             self.progress["error"] = str(e)
             log.error(f"Scrape error: {e}", exc_info=True)
