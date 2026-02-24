@@ -24,6 +24,7 @@ Run-VPS "cd $PROJECT_DIR && python3 -m venv .venv 2>/dev/null; .venv/bin/pip ins
 # 3. .env
 Write-Host "[3/7] .env..." -ForegroundColor Gray
 Run-VPS "cd $PROJECT_DIR && (test -f .env) || (cp docs/deployment/env.example .env 2>/dev/null || touch .env)"
+Run-VPS "cd $PROJECT_DIR && grep -q OAUTH_REDIRECT_URI .env 2>/dev/null || echo 'OAUTH_REDIRECT_URI=https://stockreport.khoviet.com/oauth2callback' >> .env"
 
 # 4. Systemd
 Write-Host "[4/7] Systemd service..." -ForegroundColor Gray

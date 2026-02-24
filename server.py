@@ -755,12 +755,20 @@ async def oauth2_status():
 
 @app.get("/api/oauth2/debug")
 async def oauth2_debug():
-    """Debug: redirect_uri đang dùng (để so khớp với Google Cloud Console)."""
+    """Debug: redirect_uri + client_id để so khớp với Google Cloud Console."""
+    from urllib.parse import urlparse, parse_qs
     redirect_uri = os.getenv("OAUTH_REDIRECT_URI", "https://stockreport.khoviet.com/oauth2callback")
-    return {
-        "redirect_uri": redirect_uri,
-        "hint": "Đảm bảo redirect_uri này khớp CHÍNH XÁC trong Google Cloud Console → Credentials → Authorized redirect URIs",
-    }
+    result = {"redirect_uri": redirect_uri, "client_id": "", "error": None}
+    try:
+        from google_sync import get_oauth_authorization_url
+        url = get_oauth_authorization_url()
+        params = parse_qs(urlparse(url).query)
+        result["redirect_uri_in_request"] = params.get("redirect_uri", [""])[0]
+        result["client_id"] = params.get("client_id", [""])[0]
+    except Exception as e:
+        result["error"] = str(e)
+    result["hint"] = "redirect_uri phải khớp CHÍNH XÁC trong OAuth client có client_id trên"
+    return result
 
 
 # ── Google Integration ──────────────────────────────────────────────────────
