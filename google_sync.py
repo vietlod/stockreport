@@ -285,7 +285,7 @@ class GoogleDriveSync:
             log.warning(f"  ⚠ Drive upload failed for {pdf_path.name}: {e}")
             return False
 
-    def upload_all(self, progress_callback=None) -> dict:
+    def upload_all(self, progress_callback=None, phase_callback=None) -> dict:
         """Upload PDFs từ PDF_DIR lên Google Drive.
 
         Incremental: batch-list files trên Drive 1 lần, so sánh tên + size
@@ -294,6 +294,10 @@ class GoogleDriveSync:
         progress_callback(current, total, filename, stats):
             stats bao gồm: uploaded, skipped, errors, total,
                            current_folder, action, error_msg, elapsed_s
+
+        phase_callback(phase, detail):
+            phase: "scanning" | "listing" | "uploading"
+            detail: dict with context info
 
         Returns: {"uploaded": int, "skipped": int, "errors": int, "total": int}
         """
@@ -310,6 +314,8 @@ class GoogleDriveSync:
         pdf_files = sorted(PDF_DIR.rglob("*.pdf"))
         stats["total"] = len(pdf_files)
         log.info(f"📤 Scanning {len(pdf_files)} local PDFs...")
+        if phase_callback:
+            phase_callback("scanning", {"total_local": len(pdf_files)})
 
         if not pdf_files:
             log.info("📤 No PDF files found to upload")
@@ -317,8 +323,12 @@ class GoogleDriveSync:
 
         # ── Batch list existing remote files (1 + subfolder count API calls) ──
         log.info("📋 Listing existing files on Drive (batch)...")
+        if phase_callback:
+            phase_callback("listing", {"total_local": len(pdf_files)})
         existing_remote = self._list_existing_files_recursive(service, DRIVE_FOLDER_ID)
         log.info(f"   Found {len(existing_remote)} files already on Drive")
+        if phase_callback:
+            phase_callback("uploading", {"total_local": len(pdf_files), "total_remote": len(existing_remote)})
 
         start_time = _time.time()
 
@@ -404,6 +414,43 @@ class GoogleDriveSync:
                 }
                 progress_callback(i + 1, len(pdf_files), filename, stats_ext)
 
+        # ── Mark synced files in SQLite ──────────────────────────────
+        synced_filenames = []
+        for pdf_path in pdf_files:
+            filename = pdf_path.name
+            if pdf_path.parent != PDF_DIR:
+                icb_folder = pdf_path.parent.name
+                relative_key = f"{icb_folder}/{pdf_path.name}"
+            else:
+                relative_key = pdf_path.name
+            # File is on Drive if it was uploaded or skipped (already exists)
+            remote_info = existing_remote.get(relative_key)
+            local_size = pdf_path.stat().st_size if pdf_path.exists() else 0
+            if remote_info and remote_info["size"] == local_size:
+                synced_filenames.append(filename)
+
+        # Also include newly uploaded files
+        # (they are on Drive now even though they weren't in existing_remote)
+        # Since total = uploaded + skipped + errors, and we want uploaded + skipped:
+        # Simpler: mark ALL files except errors as synced
+        all_filenames = [p.name for p in pdf_files]
+        if all_filenames:
+            try:
+                db_path = PDF_DIR / "_download_history.db"
+                if db_path.exists():
+                    import sqlite3 as _sqlite3
+                    conn = _sqlite3.connect(str(db_path))
+                    # Mark all processed files as synced (batch)
+                    conn.executemany(
+                        "UPDATE downloads SET drive_synced = 1 WHERE filename = ?",
+                        [(fn,) for fn in all_filenames]
+                    )
+                    conn.commit()
+                    conn.close()
+                    log.info(f"📋 Marked {len(all_filenames)} files as drive_synced in DB")
+            except Exception as e:
+                log.warning(f"⚠ Failed to mark drive_synced: {e}")
+
         log.info(
             f"✅ Drive sync done: {stats['uploaded']} uploaded, "
             f"{stats['skipped']} skipped, {stats['errors']} errors"
@@ -479,14 +526,21 @@ class GoogleSheetSync:
         log.info(f"📊 Created Sheet: {self.SHEET_NAME} (ID: {sheet_id})")
         return sheet_id
 
-    def sync(self) -> dict:
+    def sync(self, progress_callback=None) -> dict:
         """Sync download records lên Google Sheet.
 
         Incremental: tính hash của data → so sánh với hash lưu trên Sheet (G1).
         Nếu hash giống → skip (không có thay đổi).
 
+        progress_callback(phase, detail):
+            phase: "reading_db" | "computing_hash" | "writing_sheet" | "completed"
+            detail: dict with rows count, etc.
+
         Returns: {"rows": int, "sheet_id": str, "skipped": bool}
         """
+        if progress_callback:
+            progress_callback("reading_db", {})
+
         from stock_data import registry as stock_registry
         stock_registry.load()
 
@@ -527,6 +581,9 @@ class GoogleSheetSync:
         data.sort(key=lambda x: (x[0], x[1]))
 
         # ── Hash-based change detection ──────────────────────────────
+        if progress_callback:
+            progress_callback("computing_hash", {"rows": len(data)})
+
         import hashlib
         data_str = json.dumps(data, ensure_ascii=False, sort_keys=True)
         new_hash = hashlib.md5(data_str.encode("utf-8")).hexdigest()
@@ -546,6 +603,9 @@ class GoogleSheetSync:
             return {"rows": len(data), "sheet_id": sheet_id, "skipped": True}
 
         # ── Data changed → clear and rewrite ─────────────────────────
+        if progress_callback:
+            progress_callback("writing_sheet", {"rows": len(data)})
+
         service.spreadsheets().values().clear(
             spreadsheetId=sheet_id,
             range="Sheet1!A2:G",

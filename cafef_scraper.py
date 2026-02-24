@@ -256,7 +256,7 @@ class DownloadHistory:
             )
         """)
         # Migration: add columns if missing
-        for col, col_type in [("icb_code", "TEXT"), ("exchange", "TEXT")]:
+        for col, col_type in [("icb_code", "TEXT"), ("exchange", "TEXT"), ("drive_synced", "INTEGER DEFAULT 0")]:
             try:
                 self.conn.execute(f"ALTER TABLE downloads ADD COLUMN {col} {col_type}")
             except Exception:
@@ -264,6 +264,7 @@ class DownloadHistory:
         self.conn.execute("CREATE INDEX IF NOT EXISTS idx_stock ON downloads(stock_code)")
         self.conn.execute("CREATE INDEX IF NOT EXISTS idx_quarter ON downloads(quarter_year)")
         self.conn.execute("CREATE INDEX IF NOT EXISTS idx_icb ON downloads(icb_code)")
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_exchange ON downloads(exchange)")
         self.conn.commit()
         cnt = self.conn.execute("SELECT COUNT(*) FROM downloads").fetchone()[0]
         if cnt:

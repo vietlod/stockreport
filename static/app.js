@@ -17,6 +17,12 @@ const state = {
     ws: null,
     adminToken: localStorage.getItem('stockreport_admin') || null,
     username: localStorage.getItem('stockreport_user') || '',
+    // History filter & sort
+    historySortBy: 'downloaded_at',
+    historySortDir: 'desc',
+    historyFilterExchange: '',
+    historyFilterICB: '',
+    historyFilterSync: '',
 };
 
 // ── Init ───────────────────────────────────────────────────────────────────
@@ -276,7 +282,7 @@ function renderSelectedTickers() {
     `).join('');
 }
 
-// ── History Search ─────────────────────────────────────────────────────────
+// ── History Search & Filters ───────────────────────────────────────────────
 function initHistorySearch() {
     const input = document.getElementById('historySearch');
     let debounce = null;
@@ -286,6 +292,63 @@ function initHistorySearch() {
             state.historyPage = 1;
             loadHistory();
         }, 300);
+    });
+}
+
+async function initHistoryFilters() {
+    const data = await api('/api/history/filters');
+    if (!data) return;
+
+    const exSel = document.getElementById('filterExchange');
+    (data.exchanges || []).forEach(ex => {
+        const opt = document.createElement('option');
+        opt.value = ex;
+        opt.textContent = ex;
+        exSel.appendChild(opt);
+    });
+
+    const icbSel = document.getElementById('filterICB');
+    (data.icb_codes || []).forEach(code => {
+        const opt = document.createElement('option');
+        opt.value = code;
+        opt.textContent = code;
+        icbSel.appendChild(opt);
+    });
+}
+
+function applyHistoryFilters() {
+    state.historyFilterExchange = document.getElementById('filterExchange').value;
+    state.historyFilterICB = document.getElementById('filterICB').value;
+    state.historyFilterSync = document.getElementById('filterSync').value;
+    state.historyPage = 1;
+    loadHistory();
+}
+
+function toggleSort(col) {
+    if (state.historySortBy === col) {
+        state.historySortDir = state.historySortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+        state.historySortBy = col;
+        // Default directions
+        if (col === 'stock_code') state.historySortDir = 'asc';
+        else state.historySortDir = 'desc';
+    }
+    state.historyPage = 1;
+    loadHistory();
+    updateSortArrows();
+}
+
+function updateSortArrows() {
+    document.querySelectorAll('#historyTable th.sortable').forEach(th => {
+        const arrow = th.querySelector('.sort-arrow');
+        const col = th.dataset.sort;
+        if (col === state.historySortBy) {
+            th.classList.add('active-sort');
+            arrow.textContent = state.historySortDir === 'asc' ? '▲' : '▼';
+        } else {
+            th.classList.remove('active-sort');
+            arrow.textContent = '↕';
+        }
     });
 }
 
@@ -349,8 +412,13 @@ async function loadHistory() {
     const params = new URLSearchParams({
         limit: state.historyLimit,
         offset: (state.historyPage - 1) * state.historyLimit,
+        sort_by: state.historySortBy,
+        sort_dir: state.historySortDir,
     });
     if (search) params.set('stock_code', search.toUpperCase());
+    if (state.historyFilterExchange) params.set('exchange', state.historyFilterExchange);
+    if (state.historyFilterICB) params.set('icb_code', state.historyFilterICB);
+    if (state.historyFilterSync !== '') params.set('drive_synced', state.historyFilterSync);
 
     const data = await api(`/api/history?${params}`);
     if (!data) return;
@@ -359,11 +427,16 @@ async function loadHistory() {
 
     const body = document.getElementById('historyBody');
     if (!data.records.length) {
-        body.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:24px">Chưa có dữ liệu</td></tr>';
+        body.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:24px">Chưa có dữ liệu</td></tr>';
         return;
     }
 
-    body.innerHTML = data.records.map(r => `
+    body.innerHTML = data.records.map(r => {
+        const synced = r.drive_synced === 1;
+        const syncIcon = synced
+            ? '<span class="sync-icon sync-ok" title="Đã đồng bộ lên Drive">✔</span>'
+            : '<span class="sync-icon sync-no" title="Chưa đồng bộ">✖</span>';
+        return `
         <tr>
             <td><span class="icb-badge">${r.icb_code || '-'}</span></td>
             <td class="ticker-cell">${r.stock_code || '-'}</td>
@@ -371,9 +444,10 @@ async function loadHistory() {
             <td>${r.report_type || '-'}</td>
             <td>${r.exchange || '-'}</td>
             <td class="size-cell">${formatSize(r.file_size)}</td>
+            <td class="sync-cell">${syncIcon}</td>
             <td class="date-cell">${formatDate(r.downloaded_at)}</td>
-        </tr>
-    `).join('');
+        </tr>`;
+    }).join('');
 
     renderPagination(data.total);
 }
@@ -598,6 +672,7 @@ async function showApp() {
     initTabs();
     initTickerAutocomplete();
     initHistorySearch();
+    initHistoryFilters();
     connectWebSocket();
 }
 
@@ -805,90 +880,198 @@ function handleProgress(data) {
 }
 
 let lastSyncStatus = '';
+let syncAutoHideTimers = {};
+
+function formatEta(seconds) {
+    if (!seconds || seconds <= 0) return '';
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    if (mins > 0) return `${mins}m${secs > 0 ? secs + 's' : ''}`;
+    return `${secs}s`;
+}
 
 function handleSyncProgress(data) {
     const st = data.status;
     const syncType = data.sync_type;
+    const phase = data.phase || '';
+    const card = document.getElementById('syncStatusCard');
 
-    if (st === 'running' && syncType === 'drive') {
-        const uploaded = data.uploaded || 0;
-        const skipped = data.skipped || 0;
-        const errors = data.errors || 0;
-        const total = data.total || 0;
-        const current = data.current_index || 0;
-        const file = data.current_file || '';
-        const folder = data.current_folder || '';
-        const action = data.action || '';
-        const errorMsg = data.error_msg || '';
-        const eta = data.eta_s || 0;
+    // ── Drive ──────────────────────────────────────────────
+    if (syncType === 'drive') {
+        const row = document.getElementById('syncDriveRow');
+        const badge = document.getElementById('syncDriveBadge');
+        const bar = document.getElementById('syncDriveBar');
+        const detail = document.getElementById('syncDriveDetail');
 
-        // Update progress bar
-        if (total > 0) {
-            const pct = Math.round((current / total) * 100);
-            document.getElementById('progressBar').style.width = `${pct}%`;
+        card.style.display = '';
+        row.style.display = '';
+
+        // Clear any pending auto-hide
+        if (syncAutoHideTimers.drive) {
+            clearTimeout(syncAutoHideTimers.drive);
+            syncAutoHideTimers.drive = null;
         }
 
-        // Status text: folder + file
-        let statusText = `☁ Drive sync: `;
-        if (folder) statusText += `[${folder}] `;
-        statusText += file;
-        document.getElementById('progressText').textContent = statusText;
+        if (st === 'running') {
+            badge.textContent = phase === 'listing' ? 'đang quét' : phase === 'scanning' ? 'khởi tạo' : 'đang đồng bộ';
+            badge.className = 'sync-badge running';
+            bar.classList.remove('shimmer');
 
-        // Stats: uploaded/skipped/errors + ETA
-        let statsText = `${current}/${total} — ↑${uploaded} ⏭${skipped}`;
-        if (errors > 0) statsText += ` ✖${errors}`;
-        if (eta > 0) {
-            const mins = Math.floor(eta / 60);
-            const secs = eta % 60;
-            statsText += ` | ETA: ${mins > 0 ? mins + 'm' : ''}${secs}s`;
-        }
-        document.getElementById('progressStats').textContent = statsText;
+            if (phase === 'scanning') {
+                bar.style.width = '0%';
+                const totalLocal = data.total || 0;
+                detail.innerHTML = `<span>Đang quét ${totalLocal} files local...</span>`;
 
-        // Show errors in notes
-        if (action === 'error' && errorMsg) {
-            const notes = document.getElementById('progressNotes');
-            if (notes) {
-                notes.innerHTML += `<div class="note-item">⚠ ${file}: ${errorMsg}</div>`;
+            } else if (phase === 'listing') {
+                bar.style.width = '5%';
+                const totalLocal = data.total || 0;
+                detail.innerHTML = `<span>Đang quét files trên Drive... (${totalLocal} files local)</span>`;
+
+            } else if (phase === 'uploading') {
+                const current = data.current_index || 0;
+                const total = data.total || 0;
+                const uploaded = data.uploaded || 0;
+                const skipped = data.skipped || 0;
+                const errors = data.errors || 0;
+                const file = data.current_file || '';
+                const folder = data.current_folder || '';
+                const eta = data.eta_s || 0;
+                const action = data.action || '';
+
+                // Progress bar
+                if (total > 0) {
+                    const pct = Math.round((current / total) * 100);
+                    bar.style.width = `${pct}%`;
+                }
+
+                // Detail text
+                let html = '';
+                // File info
+                if (folder) {
+                    html += `<span class="sync-file">📁 [${folder}] ${file}</span>`;
+                } else if (file) {
+                    html += `<span class="sync-file">${file}</span>`;
+                }
+                // Stats
+                html += `<span class="sync-stats">${current}/${total} — ↑${uploaded} ⏭${skipped}`;
+                if (errors > 0) html += ` ✖${errors}`;
+                html += '</span>';
+                // ETA
+                const etaStr = formatEta(eta);
+                if (etaStr) {
+                    html += `<span class="sync-eta">ETA: ${etaStr}</span>`;
+                }
+                // Error on current file
+                if (action === 'error' && data.error_msg) {
+                    html += `<span class="sync-error">⚠ ${data.error_msg}</span>`;
+                }
+                detail.innerHTML = html;
             }
-        }
 
-        // Show progress section
-        document.getElementById('progressCard').style.display = '';
-        lastSyncStatus = `drive_${current}`;
-
-    } else if (st === 'running' && syncType === 'sheet') {
-        document.getElementById('progressText').textContent = '📊 Sheet sync đang chạy...';
-        document.getElementById('progressCard').style.display = '';
-
-    } else if (st === 'completed') {
-        if (syncType === 'drive') {
+        } else if (st === 'completed') {
             const u = data.uploaded || 0;
             const s = data.skipped || 0;
             const e = data.errors || 0;
-            document.getElementById('progressBar').style.width = '100%';
-            document.getElementById('progressText').textContent = '☁ Drive sync hoàn tất';
-            document.getElementById('progressStats').textContent =
-                `↑${u} uploaded | ⏭${s} skipped | ✖${e} errors`;
+            badge.textContent = '✅ hoàn thành';
+            badge.className = 'sync-badge completed';
+            bar.classList.remove('shimmer');
+            bar.style.width = '100%';
+            detail.innerHTML = `<span class="sync-stats">↑${u} uploaded | ⏭${s} skipped | ✖${e} errors</span>`;
             toast(`✅ Drive sync hoàn tất: ${u} uploaded, ${s} skipped, ${e} errors`, u > 0 ? 'success' : 'info');
-        } else if (syncType === 'sheet') {
-            const rows = data.rows || 0;
-            if (data.skipped) {
-                toast(`⏭ Sheet sync: dữ liệu không thay đổi (${rows} rows)`, 'info');
+            // Auto-hide after 10s
+            syncAutoHideTimers.drive = setTimeout(() => {
+                row.style.display = 'none';
+                if (!document.getElementById('syncSheetRow').style.display ||
+                    document.getElementById('syncSheetRow').style.display === 'none') {
+                    card.style.display = 'none';
+                }
+            }, 10000);
+
+        } else if (st === 'error') {
+            const err = data.error || 'Unknown';
+            badge.textContent = '❌ lỗi';
+            badge.className = 'sync-badge error';
+            bar.classList.remove('shimmer');
+            bar.style.width = '100%';
+            bar.style.background = 'var(--red)';
+            detail.innerHTML = `<span class="sync-error">${err}</span>`;
+            if ((err + '').includes('Chưa có Google OAuth token')) {
+                toast('Chưa kết nối Google Drive. Đang chuyển đến trang cấp quyền...', 'info');
+                startOAuthFlow('drive');
             } else {
-                toast(`✅ Sheet sync hoàn tất: ${rows} rows`, 'success');
+                toast(`❌ Drive sync lỗi: ${err}`, 'error');
             }
         }
-        lastSyncStatus = '';
-    } else if (st === 'error') {
-        const err = data.error || 'Unknown';
-        if ((err + '').includes('Chưa có Google OAuth token')) {
-            toast('Chưa kết nối Google Drive. Đang chuyển đến trang cấp quyền...', 'info');
-            startOAuthFlow('drive');
-        } else {
-            toast(`❌ Sync lỗi: ${err}`, 'error');
-        }
-        lastSyncStatus = '';
     }
+
+    // ── Sheet ──────────────────────────────────────────────
+    if (syncType === 'sheet') {
+        const row = document.getElementById('syncSheetRow');
+        const badge = document.getElementById('syncSheetBadge');
+        const bar = document.getElementById('syncSheetBar');
+        const detail = document.getElementById('syncSheetDetail');
+
+        card.style.display = '';
+        row.style.display = '';
+
+        // Clear any pending auto-hide
+        if (syncAutoHideTimers.sheet) {
+            clearTimeout(syncAutoHideTimers.sheet);
+            syncAutoHideTimers.sheet = null;
+        }
+
+        if (st === 'running') {
+            badge.textContent = 'đang đồng bộ';
+            badge.className = 'sync-badge running';
+            bar.classList.add('shimmer');
+
+            const phaseLabels = {
+                'reading_db': '📖 Đang đọc dữ liệu từ database...',
+                'computing_hash': `🔍 Đang kiểm tra thay đổi... (${data.rows || 0} dòng)`,
+                'writing_sheet': `📝 Đang ghi ${data.rows || 0} dòng lên Sheet...`,
+            };
+            detail.innerHTML = `<span>${phaseLabels[phase] || 'Đang xử lý...'}</span>`;
+
+        } else if (st === 'completed') {
+            const rows = data.rows || 0;
+            badge.textContent = '✅ hoàn thành';
+            badge.className = 'sync-badge completed';
+            bar.classList.remove('shimmer');
+            bar.style.width = '100%';
+            if (data.skipped) {
+                detail.innerHTML = `<span class="sync-stats">⏭ Dữ liệu không thay đổi (${rows} dòng)</span>`;
+                toast(`⏭ Sheet sync: dữ liệu không thay đổi (${rows} rows)`, 'info');
+            } else {
+                detail.innerHTML = `<span class="sync-stats">✅ Đã ghi ${rows} dòng lên Google Sheets</span>`;
+                toast(`✅ Sheet sync hoàn tất: ${rows} rows`, 'success');
+            }
+            // Auto-hide after 10s
+            syncAutoHideTimers.sheet = setTimeout(() => {
+                row.style.display = 'none';
+                if (!document.getElementById('syncDriveRow').style.display ||
+                    document.getElementById('syncDriveRow').style.display === 'none') {
+                    card.style.display = 'none';
+                }
+            }, 10000);
+
+        } else if (st === 'error') {
+            const err = data.error || 'Unknown';
+            badge.textContent = '❌ lỗi';
+            badge.className = 'sync-badge error';
+            bar.classList.remove('shimmer');
+            bar.style.width = '100%';
+            bar.style.background = 'var(--red)';
+            detail.innerHTML = `<span class="sync-error">${err}</span>`;
+            if ((err + '').includes('Chưa có Google OAuth token')) {
+                toast('Chưa kết nối Google. Đang chuyển đến trang cấp quyền...', 'info');
+                startOAuthFlow('sheet');
+            } else {
+                toast(`❌ Sheet sync lỗi: ${err}`, 'error');
+            }
+        }
+    }
+
+    lastSyncStatus = `${syncType}_${st}`;
 }
 
 function addLog(text, cls = '') {

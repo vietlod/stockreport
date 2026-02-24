@@ -208,6 +208,41 @@
                 </div>
             </section>
 
+            <!-- Sync Status Panel (dedicated, separate from scrape progress) -->
+            <section class="card sync-status-card" id="syncStatusCard" style="display:none">
+                <h2 class="card-title">
+                    <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
+                        <path d="M4 2a2 2 0 00-2 2v1h20V4a2 2 0 00-2-2H4z" opacity="0.3" />
+                        <path d="M10 6l-4 4h3v4h2v-4h3l-4-4zM2 14v2a2 2 0 002 2h12a2 2 0 002-2v-2H2z" />
+                    </svg>
+                    Đồng bộ Google
+                </h2>
+                <!-- Drive status row -->
+                <div class="sync-row" id="syncDriveRow" style="display:none">
+                    <div class="sync-row-header">
+                        <span class="sync-icon">📁</span>
+                        <span class="sync-label">Google Drive</span>
+                        <span class="sync-badge" id="syncDriveBadge">idle</span>
+                    </div>
+                    <div class="sync-progress-bar-wrap">
+                        <div class="sync-progress-bar" id="syncDriveBar" style="width:0%"></div>
+                    </div>
+                    <div class="sync-detail" id="syncDriveDetail"></div>
+                </div>
+                <!-- Sheet status row -->
+                <div class="sync-row" id="syncSheetRow" style="display:none">
+                    <div class="sync-row-header">
+                        <span class="sync-icon">📊</span>
+                        <span class="sync-label">Google Sheets</span>
+                        <span class="sync-badge" id="syncSheetBadge">idle</span>
+                    </div>
+                    <div class="sync-progress-bar-wrap">
+                        <div class="sync-progress-bar shimmer" id="syncSheetBar" style="width:0%"></div>
+                    </div>
+                    <div class="sync-detail" id="syncSheetDetail"></div>
+                </div>
+            </section>
+
             <!-- Progress Panel -->
             <section class="card progress-card" id="progressCard" style="display:none">
                 <h2 class="card-title">
@@ -265,6 +300,17 @@
                 </h2>
                 <div class="history-controls">
                     <input type="text" id="historySearch" placeholder="Tìm theo mã CK..." class="search-input">
+                    <select id="filterExchange" class="filter-select" onchange="applyHistoryFilters()">
+                        <option value="">Tất cả sàn</option>
+                    </select>
+                    <select id="filterICB" class="filter-select" onchange="applyHistoryFilters()">
+                        <option value="">Tất cả ngành</option>
+                    </select>
+                    <select id="filterSync" class="filter-select" onchange="applyHistoryFilters()">
+                        <option value="">Đồng bộ: Tất cả</option>
+                        <option value="1">✅ Đã đồng bộ</option>
+                        <option value="0">✖ Chưa đồng bộ</option>
+                    </select>
                     <span class="history-count" id="historyCount"></span>
                 </div>
                 <div class="table-wrap">
@@ -272,12 +318,17 @@
                         <thead>
                             <tr>
                                 <th>ICB</th>
-                                <th>Ticker</th>
-                                <th>Thời gian</th>
+                                <th class="sortable" data-sort="stock_code" onclick="toggleSort('stock_code')">Ticker
+                                    <span class="sort-arrow">▲</span></th>
+                                <th class="sortable" data-sort="quarter_year" onclick="toggleSort('quarter_year')">Thời
+                                    gian <span class="sort-arrow">↕</span></th>
                                 <th>Loại</th>
                                 <th>Sàn</th>
                                 <th>Dung lượng</th>
-                                <th>Ngày tải</th>
+                                <th>Đồng bộ</th>
+                                <th class="sortable active-sort" data-sort="downloaded_at"
+                                    onclick="toggleSort('downloaded_at')">Ngày tải <span class="sort-arrow">▼</span>
+                                </th>
                             </tr>
                         </thead>
                         <tbody id="historyBody"></tbody>

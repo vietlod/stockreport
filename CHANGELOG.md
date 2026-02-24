@@ -2,6 +2,44 @@
 
 Tất cả thay đổi đáng chú ý của dự án được ghi nhận tại đây.
 
+## [1.1.2] - 2026-02-24
+
+### 🚀 Tính năng mới
+
+#### Sync Status Panel (`server.py`, `google_sync.py`, `app.js`)
+- **Dedicated sync panel**: tách hoàn toàn khỏi khung scrape progress
+- **Drive sync phases**: `scanning` → `listing` → `uploading` — hiện folder, filename, stats (↑/⏭/✖), ETA
+- **Sheet sync phases**: `reading_db` → `computing_hash` → `writing_sheet` — shimmer progress bar
+- **Badges**: trạng thái `running` (pulse animation) / `completed` (xanh) / `error` (đỏ)
+- **Auto-hide**: tự ẩn panel sau 10s khi sync hoàn tất
+- **Phase callbacks**: `upload_all(phase_callback=...)`, `sync(progress_callback=...)` broadcast qua WebSocket
+
+#### Lịch sử tải — Filter & Sort (`server.py`, `app.js`, `index.html`)
+- **Cột "Đồng bộ"**: hiện ✔ xanh (đã sync Drive) / ✖ đỏ (chưa sync) — sau cột Dung lượng
+- **Filter theo Sàn**: dropdown populate từ DB (`/api/history/filters`)
+- **Filter theo Ngành ICB**: dropdown populate từ DB
+- **Filter theo Đồng bộ**: Tất cả / Đã đồng bộ / Chưa đồng bộ
+- **Sort Ticker**: click header, mặc định A→Z
+- **Sort Thời gian**: click header, mặc định mới→cũ
+- **Sort Ngày tải**: click header, mặc định mới→cũ (active)
+- **Endpoint mới**: `GET /api/history/filters` — distinct exchanges + ICB codes
+
+### 🔧 Cải tiến
+
+#### Database (`cafef_scraper.py`)
+- **Cột `drive_synced`**: `INTEGER DEFAULT 0`, auto-migration
+- **Index**: thêm `idx_exchange` cho filter performance
+
+#### Drive Sync Marking (`google_sync.py`, `server.py`)
+- **Batch marking**: sau `upload_all()`, đánh dấu tất cả files đã xử lý là `drive_synced=1`
+- **Real-time marking**: khi scrape có Drive sync, mỗi file upload thành công → `drive_synced=1` ngay
+
+#### API `/api/history` (`server.py`)
+- Thêm query params: `exchange`, `drive_synced`, `sort_by`, `sort_dir`
+- Sort validation: chỉ cho phép `stock_code`, `quarter_year`, `downloaded_at`
+
+---
+
 ## [1.1.1] - 2026-02-24
 
 ### 🚀 Tính năng mới

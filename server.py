@@ -177,6 +177,18 @@ class ScrapeJob:
                 if drive_sync and dest.exists():
                     if drive_sync.upload_single(dest):
                         drive_sync_count[0] += 1
+                        # Mark file as synced in DB
+                        try:
+                            db_conn = get_db()
+                            if db_conn:
+                                db_conn.execute(
+                                    "UPDATE downloads SET drive_synced = 1 WHERE filename = ?",
+                                    (dest.name,)
+                                )
+                                db_conn.commit()
+                                db_conn.close()
+                        except Exception:
+                            pass
 
             scraper.on_download_callback = on_download
 
@@ -366,6 +378,14 @@ class SyncJob:
             from google_sync import GoogleDriveSync
             sync = GoogleDriveSync()
 
+            def on_phase(phase, detail):
+                self._drive_progress.update({
+                    "phase": phase,
+                    "total": detail.get("total_local", 0),
+                    "total_remote": detail.get("total_remote", 0),
+                })
+                self._broadcast_sync({"type": "sync_progress", **self._drive_progress})
+
             def on_progress(current, total, filename, stats):
                 # ETA calculation
                 elapsed = stats.get("elapsed_s", 0)
@@ -378,6 +398,7 @@ class SyncJob:
                 else:
                     eta_s = 0
                 self._drive_progress.update({
+                    "phase": "uploading",
                     "uploaded": stats["uploaded"],
                     "skipped": stats["skipped"],
                     "errors": stats["errors"],
@@ -391,9 +412,10 @@ class SyncJob:
                 })
                 self._broadcast_sync({"type": "sync_progress", **self._drive_progress})
 
-            stats = sync.upload_all(progress_callback=on_progress)
+            stats = sync.upload_all(progress_callback=on_progress, phase_callback=on_phase)
             self._drive_progress.update({
                 "status": "completed",
+                "phase": "done",
                 "uploaded": stats["uploaded"],
                 "skipped": stats["skipped"],
                 "errors": stats["errors"],
@@ -412,9 +434,18 @@ class SyncJob:
         try:
             from google_sync import GoogleSheetSync
             sync = GoogleSheetSync()
-            result = sync.sync()
+
+            def on_sheet_progress(phase, detail):
+                self._sheet_progress.update({
+                    "phase": phase,
+                    "rows": detail.get("rows", 0),
+                })
+                self._broadcast_sync({"type": "sync_progress", **self._sheet_progress})
+
+            result = sync.sync(progress_callback=on_sheet_progress)
             self._sheet_progress.update({
                 "status": "completed",
+                "phase": "done",
                 "rows": result.get("rows", 0),
                 "skipped": result.get("skipped", False),
                 "sheet_id": result.get("sheet_id", ""),
@@ -522,11 +553,15 @@ async def get_tickers(
 async def get_history(
     stock_code: str = Query(None),
     icb_code: str = Query(None),
+    exchange: str = Query(None),
     quarter_year: str = Query(None),
+    drive_synced: int = Query(None, ge=0, le=1),
+    sort_by: str = Query("downloaded_at"),
+    sort_dir: str = Query("desc"),
     limit: int = Query(100),
     offset: int = Query(0),
 ):
-    """Query download history từ SQLite."""
+    """Query download history từ SQLite với filter + sorting."""
     conn = get_db()
     if not conn:
         return {"records": [], "total": 0}
@@ -539,18 +574,33 @@ async def get_history(
     if icb_code:
         conditions.append("icb_code = ?")
         params.append(icb_code)
+    if exchange:
+        conditions.append("exchange = ?")
+        params.append(exchange.upper())
     if quarter_year:
         conditions.append("quarter_year LIKE ?")
         params.append(f"%{quarter_year}%")
+    if drive_synced is not None:
+        conditions.append("drive_synced = ?")
+        params.append(drive_synced)
 
     where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+
+    # Sort validation
+    allowed_sorts = {
+        "stock_code": "stock_code",
+        "quarter_year": "quarter_year",
+        "downloaded_at": "downloaded_at",
+    }
+    sort_col = allowed_sorts.get(sort_by, "downloaded_at")
+    sort_direction = "ASC" if sort_dir.lower() == "asc" else "DESC"
 
     total = conn.execute(
         f"SELECT COUNT(*) FROM downloads {where}", params
     ).fetchone()[0]
 
     rows = conn.execute(
-        f"SELECT * FROM downloads {where} ORDER BY downloaded_at DESC LIMIT ? OFFSET ?",
+        f"SELECT * FROM downloads {where} ORDER BY {sort_col} {sort_direction} LIMIT ? OFFSET ?",
         params + [limit, offset]
     ).fetchall()
 
@@ -559,6 +609,25 @@ async def get_history(
         "records": [dict(r) for r in rows],
         "total": total,
     }
+
+
+@app.get("/api/history/filters")
+async def get_history_filters():
+    """Trả danh sách distinct exchanges và ICB codes cho filter dropdowns."""
+    conn = get_db()
+    if not conn:
+        return {"exchanges": [], "icb_codes": []}
+
+    exchanges = [r[0] for r in conn.execute(
+        "SELECT DISTINCT exchange FROM downloads WHERE exchange != '' AND exchange IS NOT NULL ORDER BY exchange"
+    ).fetchall()]
+
+    icb_codes = [r[0] for r in conn.execute(
+        "SELECT DISTINCT icb_code FROM downloads WHERE icb_code != '' AND icb_code IS NOT NULL ORDER BY icb_code"
+    ).fetchall()]
+
+    conn.close()
+    return {"exchanges": exchanges, "icb_codes": icb_codes}
 
 
 @app.get("/api/stats")
