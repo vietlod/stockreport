@@ -38,8 +38,10 @@ PDF_DIR = Path(os.getenv("PDF_DIR", "./pdf"))
 TOKEN_FILE = Path(__file__).parent / "_google_token.json"
 
 # Google API scopes
+# drive: full access (required for service account accessing shared folders)
+# drive.file chỉ cho phép truy cập files do app tạo → gây lỗi upload vào shared folder
 SCOPES = [
-    "https://www.googleapis.com/auth/drive.file",
+    "https://www.googleapis.com/auth/drive",
     "https://www.googleapis.com/auth/spreadsheets",
 ]
 
@@ -229,14 +231,21 @@ class GoogleDriveSync:
             filename = pdf_path.name
             if self._file_exists(service, filename, parent_id):
                 return True
+            local_size = pdf_path.stat().st_size
+            use_resumable = local_size > 5 * 1024 * 1024
             media = MediaFileUpload(
-                str(pdf_path), mimetype="application/pdf", resumable=True
+                str(pdf_path), mimetype="application/pdf",
+                resumable=use_resumable,
             )
-            service.files().create(
+            result = service.files().create(
                 body={"name": filename, "parents": [parent_id]},
-                media_body=media, fields="id"
+                media_body=media, fields="id,size"
             ).execute()
-            log.info(f"  ☁ [{filename}] → Drive")
+            remote_size = int(result.get("size", 0))
+            if remote_size != local_size:
+                log.warning(f"  ⚠ Size mismatch after upload: {filename} "
+                            f"(local={local_size}B, remote={remote_size}B)")
+            log.info(f"  ☁ [{filename}] → Drive ({local_size}B)")
             return True
         except Exception as e:
             log.warning(f"  ⚠ Drive upload failed for {pdf_path.name}: {e}")
@@ -248,12 +257,17 @@ class GoogleDriveSync:
         Incremental: batch-list files trên Drive 1 lần, so sánh tên + size
         → chỉ upload files mới hoặc bị corrupt (size khác).
 
+        progress_callback(current, total, filename, stats):
+            stats bao gồm: uploaded, skipped, errors, total,
+                           current_folder, action, error_msg, elapsed_s
+
         Returns: {"uploaded": int, "skipped": int, "errors": int, "total": int}
         """
         if not DRIVE_FOLDER_ID:
             raise ValueError("GOOGLE_DRIVE_FOLDER_ID not configured in .env")
 
         from googleapiclient.http import MediaFileUpload
+        import time as _time
 
         service = self._service()
         stats = {"uploaded": 0, "skipped": 0, "errors": 0, "total": 0}
@@ -263,17 +277,29 @@ class GoogleDriveSync:
         stats["total"] = len(pdf_files)
         log.info(f"📤 Scanning {len(pdf_files)} local PDFs...")
 
+        if not pdf_files:
+            log.info("📤 No PDF files found to upload")
+            return stats
+
         # ── Batch list existing remote files (1 + subfolder count API calls) ──
         log.info("📋 Listing existing files on Drive (batch)...")
         existing_remote = self._list_existing_files_recursive(service, DRIVE_FOLDER_ID)
         log.info(f"   Found {len(existing_remote)} files already on Drive")
 
+        start_time = _time.time()
+
         for i, pdf_path in enumerate(pdf_files):
+            action = "skip"
+            error_msg = ""
+            current_folder = ""
+            filename = pdf_path.name
+
             try:
                 # Determine relative key and target folder
                 if pdf_path.parent != PDF_DIR:
                     icb_folder = pdf_path.parent.name
                     relative_key = f"{icb_folder}/{pdf_path.name}"
+                    current_folder = icb_folder
                 else:
                     relative_key = pdf_path.name
 
@@ -283,50 +309,62 @@ class GoogleDriveSync:
                 remote_info = existing_remote.get(relative_key)
                 if remote_info and remote_info["size"] == local_size:
                     stats["skipped"] += 1
-                    continue
-
-                # Need upload — get or create parent folder
-                if pdf_path.parent != PDF_DIR:
-                    parent_id = self._get_or_create_folder(
-                        service, icb_folder, DRIVE_FOLDER_ID
-                    )
+                    action = "skip"
                 else:
-                    parent_id = DRIVE_FOLDER_ID
+                    # Need upload — get or create parent folder
+                    if pdf_path.parent != PDF_DIR:
+                        parent_id = self._get_or_create_folder(
+                            service, icb_folder, DRIVE_FOLDER_ID
+                        )
+                    else:
+                        parent_id = DRIVE_FOLDER_ID
 
-                filename = pdf_path.name
+                    # Delete corrupt remote file if size mismatch
+                    if remote_info and remote_info["size"] != local_size:
+                        try:
+                            service.files().delete(fileId=remote_info["id"]).execute()
+                            log.info(f"  🗑 Deleted corrupt remote: {relative_key} "
+                                     f"(remote={remote_info['size']}B, local={local_size}B)")
+                        except Exception:
+                            pass  # file may already be gone
 
-                # Delete corrupt remote file if size mismatch
-                if remote_info and remote_info["size"] != local_size:
-                    try:
-                        service.files().delete(fileId=remote_info["id"]).execute()
-                        log.info(f"  🗑 Deleted corrupt remote: {relative_key} "
-                                 f"(remote={remote_info['size']}B, local={local_size}B)")
-                    except Exception:
-                        pass  # file may already be gone
+                    # Upload — non-resumable cho files nhỏ (< 5MB), resumable cho lớn
+                    use_resumable = local_size > 5 * 1024 * 1024
+                    media = MediaFileUpload(
+                        str(pdf_path),
+                        mimetype="application/pdf",
+                        resumable=use_resumable,
+                    )
+                    file_meta = {
+                        "name": filename,
+                        "parents": [parent_id],
+                    }
+                    result = service.files().create(
+                        body=file_meta, media_body=media, fields="id,size"
+                    ).execute()
 
-                # Upload
-                media = MediaFileUpload(
-                    str(pdf_path),
-                    mimetype="application/pdf",
-                    resumable=True,
-                )
-                file_meta = {
-                    "name": filename,
-                    "parents": [parent_id],
-                }
-                service.files().create(
-                    body=file_meta, media_body=media, fields="id"
-                ).execute()
-
-                stats["uploaded"] += 1
-                log.info(f"  ↑ [{i+1}/{len(pdf_files)}] {filename}")
-
-                if progress_callback:
-                    progress_callback(i + 1, len(pdf_files), filename, stats)
+                    stats["uploaded"] += 1
+                    action = "upload"
+                    log.info(f"  ↑ [{i+1}/{len(pdf_files)}] {filename} "
+                             f"({local_size}B → {result.get('id', '?')})")
 
             except Exception as e:
                 stats["errors"] += 1
-                log.error(f"  ✖ Error uploading {pdf_path.name}: {e}")
+                action = "error"
+                error_msg = str(e)
+                log.error(f"  ✖ Error uploading {filename}: {e}")
+
+            # Progress callback — gọi cho MỌI file (upload, skip, error)
+            if progress_callback:
+                elapsed = _time.time() - start_time
+                stats_ext = {
+                    **stats,
+                    "current_folder": current_folder,
+                    "action": action,
+                    "error_msg": error_msg,
+                    "elapsed_s": round(elapsed, 1),
+                }
+                progress_callback(i + 1, len(pdf_files), filename, stats_ext)
 
         log.info(
             f"✅ Drive sync done: {stats['uploaded']} uploaded, "

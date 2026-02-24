@@ -781,19 +781,63 @@ function handleSyncProgress(data) {
     if (st === 'running' && syncType === 'drive') {
         const uploaded = data.uploaded || 0;
         const skipped = data.skipped || 0;
+        const errors = data.errors || 0;
         const total = data.total || 0;
         const current = data.current_index || 0;
         const file = data.current_file || '';
-        if (current > 0 && lastSyncStatus !== `drive_${current}`) {
-            toast(`☁ Drive: ${file} (${current}/${total}) — ↑${uploaded} ⏭${skipped}`, 'info');
-            lastSyncStatus = `drive_${current}`;
+        const folder = data.current_folder || '';
+        const action = data.action || '';
+        const errorMsg = data.error_msg || '';
+        const eta = data.eta_s || 0;
+
+        // Update progress bar
+        if (total > 0) {
+            const pct = Math.round((current / total) * 100);
+            document.getElementById('progressBar').style.width = `${pct}%`;
         }
+
+        // Status text: folder + file
+        let statusText = `☁ Drive sync: `;
+        if (folder) statusText += `[${folder}] `;
+        statusText += file;
+        document.getElementById('progressText').textContent = statusText;
+
+        // Stats: uploaded/skipped/errors + ETA
+        let statsText = `${current}/${total} — ↑${uploaded} ⏭${skipped}`;
+        if (errors > 0) statsText += ` ✖${errors}`;
+        if (eta > 0) {
+            const mins = Math.floor(eta / 60);
+            const secs = eta % 60;
+            statsText += ` | ETA: ${mins > 0 ? mins + 'm' : ''}${secs}s`;
+        }
+        document.getElementById('progressStats').textContent = statsText;
+
+        // Show errors in notes
+        if (action === 'error' && errorMsg) {
+            const notes = document.getElementById('progressNotes');
+            if (notes) {
+                notes.innerHTML += `<div class="note-item">⚠ ${file}: ${errorMsg}</div>`;
+            }
+        }
+
+        // Show progress section
+        document.getElementById('progressCard').style.display = '';
+        lastSyncStatus = `drive_${current}`;
+
+    } else if (st === 'running' && syncType === 'sheet') {
+        document.getElementById('progressText').textContent = '📊 Sheet sync đang chạy...';
+        document.getElementById('progressCard').style.display = '';
+
     } else if (st === 'completed') {
         if (syncType === 'drive') {
             const u = data.uploaded || 0;
             const s = data.skipped || 0;
             const e = data.errors || 0;
-            toast(`✅ Drive sync hoàn tất: ${u} uploaded, ${s} skipped, ${e} errors`, 'success');
+            document.getElementById('progressBar').style.width = '100%';
+            document.getElementById('progressText').textContent = '☁ Drive sync hoàn tất';
+            document.getElementById('progressStats').textContent =
+                `↑${u} uploaded | ⏭${s} skipped | ✖${e} errors`;
+            toast(`✅ Drive sync hoàn tất: ${u} uploaded, ${s} skipped, ${e} errors`, u > 0 ? 'success' : 'info');
         } else if (syncType === 'sheet') {
             const rows = data.rows || 0;
             if (data.skipped) {

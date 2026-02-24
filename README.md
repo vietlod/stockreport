@@ -181,10 +181,16 @@ Module `cleanup.py` tự động xóa files PDF hết hạn retention.
 Sync Drive/Sheet chạy trong background thread (daemon), **không phụ thuộc browser tab**:
 
 - **Concurrent**: Drive và Sheet chạy đồng thời, không chặn lẫn nhau
-- **Drive**: batch listing thay vì N+1 queries, so sánh file size detect corrupt
+- **Auto Sheet sync**: tự động sync Sheet sau khi scraping hoàn tất (nếu có file mới)
+- **Drive**: batch listing, so sánh file size detect corrupt, non-resumable cho < 5MB
 - **Sheet**: hash-based incremental — skip nếu data không thay đổi
-- **Tiến trình**: broadcast qua WebSocket (`type: sync_progress`)
+- **Scope**: sử dụng `drive` scope (full access) — required cho service account truy cập shared folder
+- **Tiến trình chi tiết**: broadcast qua WebSocket (`type: sync_progress`)
+  - Hiển thị sub-folder + filename đang sync: `☁ Drive sync: [0570] report.pdf`
+  - Counts + ETA: `45/200 — ↑12 ⏭33 | ETA: 2m30s`
+  - Lỗi upload hiện trong progressNotes section
 - **Status API**: `GET /api/sync/status` trả trạng thái cả Drive và Sheet
+- **Diagnostic**: `GET /api/gdrive/test` — test upload 1 file PDF, trả kết quả chi tiết
 
 ## Multi-Ticker Scraping
 

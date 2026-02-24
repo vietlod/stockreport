@@ -27,6 +27,10 @@ Tất cả thay đổi đáng chú ý của dự án được ghi nhận tại �
 #### Google Drive Sync (`google_sync.py`)
 - **Batch file listing**: `_list_existing_files_recursive()` thay N+1 per-file queries
 - **File size check**: detect file upload dở/corrupt → auto delete + re-upload
+- **Non-resumable upload**: files < 5MB dùng non-resumable (fix empty files trên Drive)
+- **Scope upgrade**: `drive.file` → `drive` — fix lỗi upload vào shared folder
+- **Upload verification**: request `id,size` fields sau upload, log warning nếu size mismatch
+- **Diagnostic endpoint**: `GET /api/gdrive/test` — test upload 1 file + trả kết quả chi tiết
 
 #### Google Sheet Sync (`google_sync.py`)
 - **Hash-based incremental**: MD5 hash data → lưu vào G1 → skip nếu data không đổi
@@ -35,13 +39,22 @@ Tất cả thay đổi đáng chú ý của dự án được ghi nhận tại �
 - **Login screen**: glassmorphism, fade-in animation, purple accents
 - **Header**: user avatar + dropdown menu (thay nút Logout)
 - **Settings modal**: glassmorphism overlay, slide-up animation
-- **WebSocket sync progress**: live toast notifications cho Drive upload + Sheet sync
 - **Toast stacking**: fix toast chồng lên nhau — dùng `#toastContainer` flexbox, max 3 visible
 - **Progress notes**: tách Lỗi/Lọc ra mục ghi chú riêng (màu đỏ, in nghiêng) dưới khung tiến trình
   - Chi tiết lỗi: hiển ticker + filename + thông tin lỗi cụ thể
   - Diễn giải bộ lọc thời gian: hiển số entries bị lọc + khoảng thời gian
+- **Drive sync progress**: hiển thị trực tiếp trên progress bar
+  - Sub-folder + filename đang sync: `☁ Drive sync: [0570] report.pdf`
+  - Counts + ETA: `45/200 — ↑12 ⏭33 | ETA: 2m30s`
+  - Lỗi upload hiện trong progressNotes section
 
 ### 🐛 Bugfixes
+
+#### Google Drive Upload (`google_sync.py`)
+- **Fix empty folders**: sub-folders tạo được nhưng files bên trong rỗng
+  - Root cause 1: scope `drive.file` chỉ cho phép truy cập files do app tạo → đổi sang `drive`
+  - Root cause 2: `resumable=True` cho mọi file có thể fail silently → dùng `resumable=False` cho < 5MB
+  - Fix: progress callback chỉ gọi khi upload thành công → giờ gọi cho MỌI file (upload/skip/error)
 
 #### Multi-Ticker Scraper (`cafef_scraper.py`)
 - **Fix HHV contamination**: ticker lạ (HHV) xuất hiện ở đầu mỗi group vì DOM chưa update sau search

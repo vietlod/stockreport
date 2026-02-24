@@ -367,13 +367,27 @@ class SyncJob:
             sync = GoogleDriveSync()
 
             def on_progress(current, total, filename, stats):
+                # ETA calculation
+                elapsed = stats.get("elapsed_s", 0)
+                processed = stats["uploaded"] + stats["errors"]  # skip doesn't count for ETA
+                if processed > 0 and current < total:
+                    avg_per_file = elapsed / processed if processed else 0
+                    remaining = total - current
+                    # Only count remaining uploads (not skips)
+                    eta_s = round(avg_per_file * remaining)
+                else:
+                    eta_s = 0
                 self._drive_progress.update({
                     "uploaded": stats["uploaded"],
                     "skipped": stats["skipped"],
                     "errors": stats["errors"],
                     "total": total,
                     "current_file": filename,
+                    "current_folder": stats.get("current_folder", ""),
                     "current_index": current,
+                    "action": stats.get("action", ""),
+                    "error_msg": stats.get("error_msg", ""),
+                    "eta_s": eta_s,
                 })
                 self._broadcast_sync({"type": "sync_progress", **self._drive_progress})
 
@@ -742,6 +756,61 @@ async def gdrive_sync(_: bool = Depends(require_admin)):
     except Exception as e:
         log.error(f"Google Drive sync error: {e}", exc_info=True)
         return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.get("/api/gdrive/test")
+async def gdrive_test(_: bool = Depends(require_admin)):
+    """Diagnostic: test Drive upload with 1 PDF file. Returns detailed results."""
+    try:
+        _check_google_drive_config()
+        from google_sync import GoogleDriveSync, DRIVE_FOLDER_ID, PDF_DIR, SCOPES
+        from googleapiclient.http import MediaFileUpload
+
+        sync = GoogleDriveSync()
+        service = sync._service()
+
+        # Find first PDF
+        pdfs = sorted(PDF_DIR.rglob("*.pdf"))
+        if not pdfs:
+            return {"error": "No PDF files found in PDF_DIR", "pdf_dir": str(PDF_DIR)}
+
+        test_file = pdfs[0]
+        local_size = test_file.stat().st_size
+        filename = test_file.name
+        icb_folder = test_file.parent.name if test_file.parent != PDF_DIR else None
+
+        # Get parent folder
+        if icb_folder:
+            parent_id = sync._get_or_create_folder(service, icb_folder, DRIVE_FOLDER_ID)
+        else:
+            parent_id = DRIVE_FOLDER_ID
+
+        # Upload (non-resumable)
+        media = MediaFileUpload(
+            str(test_file), mimetype="application/pdf", resumable=False
+        )
+        result = service.files().create(
+            body={"name": f"_test_{filename}", "parents": [parent_id]},
+            media_body=media, fields="id,name,size,mimeType"
+        ).execute()
+
+        return {
+            "status": "success",
+            "local_file": str(test_file),
+            "local_size": local_size,
+            "icb_folder": icb_folder,
+            "parent_id": parent_id,
+            "drive_folder_id": DRIVE_FOLDER_ID,
+            "remote": result,
+            "scopes": SCOPES,
+            "creds_type": type(sync.creds).__name__,
+        }
+    except Exception as e:
+        import traceback
+        return JSONResponse(status_code=500, content={
+            "error": str(e),
+            "traceback": traceback.format_exc(),
+        })
 
 
 @app.post("/api/gsheet/sync")
