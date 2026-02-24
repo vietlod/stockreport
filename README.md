@@ -62,8 +62,8 @@ HEADLESS=true
 PAGE_DELAY=1.5            # Delay giữa các trang (giây)
 DOWNLOAD_DELAY=0.5        # Delay giữa các PDF (giây)
 
-# Google Integration
-GOOGLE_SERVICE_ACCOUNT_KEY=./google_oauth_credentials.json
+# Google Integration (OAuth2 only)
+GOOGLE_OAUTH_CREDENTIALS=./google_oauth_credentials.json
 GOOGLE_DRIVE_FOLDER_ID=<your-folder-id>
 GOOGLE_SHEET_FOLDER_ID=<your-folder-id>
 ```
@@ -72,13 +72,14 @@ GOOGLE_SHEET_FOLDER_ID=<your-folder-id>
 
 File `google_oauth_credentials.json` là OAuth2 Client credentials (web type).
 
-Lần đầu sử dụng Sync Drive/Sheet:
-1. Browser mở trang Google consent
-2. Đăng nhập và cấp quyền
-3. Token lưu tự động vào `_google_token.json`
+**Flow lần đầu:**
+1. Restart server → gọi Sync Drive (hoặc `GET /api/gdrive/test`)
+2. Browser mở trang Google consent
+3. Đăng nhập Google account có quyền truy cập Drive folder
+4. Cho phép (Allow) → token tự lưu vào `_google_token.json`
+5. Lần sau không cần consent lại (token tự refresh)
 
-> **Lưu ý**: Nếu muốn dùng Service Account, tạo key từ Google Cloud Console
-> và thay đổi code trong `google_sync.py` (sử dụng `from_service_account_file`).
+> **VPS:** Chạy consent flow trên máy local (có browser), rồi copy `_google_token.json` lên VPS.
 
 ## Chạy ứng dụng
 
@@ -121,6 +122,7 @@ MAX_PAGES=0 python cafef_scraper.py
 | `GET` | `/api/scrape/status` | Trạng thái job |
 | `POST` | `/api/scrape/stop` | Dừng job |
 | `POST` | `/api/gdrive/sync` | Upload PDF lên Google Drive (background) |
+| `GET` | `/api/gdrive/test` | Test upload 1 file → xác nhận Drive hoạt động |
 | `POST` | `/api/gsheet/sync` | Sync metadata lên Google Sheets (background, incremental) |
 | `GET` | `/api/sync/status` | Trạng thái sync hiện tại |
 | `GET` | `/api/settings` | Lấy cài đặt + retention options |
@@ -182,7 +184,7 @@ Sync Drive/Sheet chạy trong background thread (daemon), **không phụ thuộc
 
 - **Concurrent**: Drive và Sheet chạy đồng thời, không chặn lẫn nhau
 - **Auto Sheet sync**: tự động sync Sheet sau khi scraping hoàn tất (nếu có file mới)
-- **OAuth2 credentials**: ưu tiên OAuth (user quota), fallback Service Account (chỉ Shared Drives)
+- **OAuth2 only**: dùng quota của user đã đăng nhập, token lưu `_google_token.json`
 - **Drive**: batch listing, so sánh file size detect corrupt, non-resumable cho < 5MB
 - **Sheet**: hash-based incremental — skip nếu data không thay đổi
 - **Tiến trình chi tiết**: broadcast qua WebSocket (`type: sync_progress`)

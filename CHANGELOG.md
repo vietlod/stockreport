@@ -25,10 +25,10 @@ Tất cả thay đổi đáng chú ý của dự án được ghi nhận tại �
 ### 🔧 Cải tiến
 
 #### Google Drive Sync (`google_sync.py`)
-- **OAuth2 credentials**: chuyển từ Service Account sang OAuth2 (SA không có storage quota)
-  - Ưu tiên `google_oauth_credentials.json`, fallback `service_account.json`
-  - Env vars: `GOOGLE_OAUTH_CREDENTIALS` (mới) + `GOOGLE_SERVICE_ACCOUNT_KEY` (fallback)
-  - Token lưu tại `_google_token.json`, tự refresh khi hết hạn
+- **OAuth2 only**: bỏ Service Account, chỉ dùng OAuth (user quota)
+  - `google_oauth_credentials.json` (web type) — bắt buộc
+  - Lần đầu: mở browser consent → token lưu `_google_token.json`
+  - Env: `GOOGLE_OAUTH_CREDENTIALS`, `GOOGLE_DRIVE_FOLDER_ID`
 - **Batch file listing**: `_list_existing_files_recursive()` thay N+1 per-file queries
 - **File size check**: detect file upload dở/corrupt → auto delete + re-upload
 - **Non-resumable upload**: files < 5MB dùng non-resumable (fix empty files trên Drive)
