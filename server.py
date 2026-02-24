@@ -807,10 +807,16 @@ async def gdrive_test(_: bool = Depends(require_admin)):
         }
     except Exception as e:
         import traceback
-        return JSONResponse(status_code=500, content={
-            "error": str(e),
-            "traceback": traceback.format_exc(),
-        })
+        from googleapiclient.errors import HttpError
+        err_detail = {"error": str(e), "traceback": traceback.format_exc()}
+        if isinstance(e, HttpError):
+            err_detail["http_status"] = e.resp.status
+            err_detail["http_reason"] = getattr(e.resp, "reason", "")
+            try:
+                err_detail["http_content"] = e.content.decode("utf-8", errors="replace") if e.content else ""
+            except Exception:
+                err_detail["http_content"] = str(e.content)[:500]
+        return JSONResponse(status_code=500, content=err_detail)
 
 
 @app.post("/api/gsheet/sync")
