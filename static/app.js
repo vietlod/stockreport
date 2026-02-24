@@ -20,15 +20,11 @@ const state = {
 
 // ── Init ───────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
-    updateAuthUI();
-    await loadStockData();
-    await loadStats();
-    await loadHistory();
-    initYearSelects();
-    initTabs();
-    initTickerAutocomplete();
-    initHistorySearch();
-    connectWebSocket();
+    if (state.adminToken) {
+        showApp();
+    } else {
+        document.getElementById('loginScreen').classList.add('visible');
+    }
 });
 
 // ── API Helpers ────────────────────────────────────────────────────────────
@@ -96,9 +92,19 @@ function renderExchangeGrid() {
 
 function renderIndustrySelect() {
     const sel = document.getElementById('industrySelect');
-    sel.innerHTML = state.stockData.industries.map(ind =>
-        `<option value="${ind.code}">[${ind.code}] ${ind.name} (${ind.count})</option>`
-    ).join('');
+    sel.innerHTML = '<option value="" disabled>Chọn ngành ICB (Ctrl+click để chọn nhiều)</option>' +
+        state.stockData.industries.map(ind =>
+            `<option value="${ind.code}">[${ind.code}] ${ind.name} (${ind.count})</option>`
+        ).join('');
+    if (!sel.dataset.listenerAdded) {
+        sel.addEventListener('change', updateSelectedIndustries);
+        sel.dataset.listenerAdded = '1';
+    }
+}
+
+function updateSelectedIndustries() {
+    const sel = document.getElementById('industrySelect');
+    state.selectedIndustries = [...sel.selectedOptions].map(o => o.value).filter(Boolean);
 }
 
 function renderIndexGrid() {
@@ -128,6 +134,11 @@ function renderIndexGrid() {
 
 function updateSelectedExchanges() {
     state.selectedExchanges = [...document.querySelectorAll('#exchangeGrid input:checked')].map(cb => cb.value);
+}
+
+function updateSelectedIndustries() {
+    const sel = document.getElementById('industrySelect');
+    if (sel) state.selectedIndustries = [...sel.selectedOptions].map(o => o.value).filter(Boolean);
 }
 
 function updateSelectedIndexes() {
@@ -363,7 +374,8 @@ function goPage(page) {
 
 // ── Scrape Job ─────────────────────────────────────────────────────────────
 async function startScrape() {
-    const config = buildScrapeConfig();
+    const config = await buildScrapeConfig();
+    if (!config) return;
 
     const resp = await api('/api/scrape', {
         method: 'POST',
@@ -387,26 +399,41 @@ async function stopScrape() {
     toast('Đang dừng...', 'info');
 }
 
-function buildScrapeConfig() {
-    const config = {};
+async function buildScrapeConfig() {
+    updateSelectedIndustries();
+    const config = { max_pages: 0 };
+    const tickerSet = new Set();
 
-    // Tickers / groups
     if (state.selectedTickers.length) {
-        config.stock_code = state.selectedTickers.join(',');
+        state.selectedTickers.forEach(t => tickerSet.add(t.toUpperCase()));
+    }
+    if (state.selectedExchanges.length) {
+        for (const ex of state.selectedExchanges) {
+            const data = await api(`/api/tickers?exchange=${encodeURIComponent(ex)}`);
+            if (data?.tickers) data.tickers.forEach(t => tickerSet.add(t.ticker));
+        }
+    }
+    if (state.selectedIndustries.length) {
+        for (const icb of state.selectedIndustries) {
+            const data = await api(`/api/tickers?icb_code=${encodeURIComponent(icb)}`);
+            if (data?.tickers) data.tickers.forEach(t => tickerSet.add(t.ticker));
+        }
+    }
+    if (state.selectedIndexes.length) {
+        for (const idx of state.selectedIndexes) {
+            const data = await api(`/api/tickers?index_code=${encodeURIComponent(idx)}`);
+            if (data?.tickers) data.tickers.forEach(t => tickerSet.add(t.ticker));
+        }
     }
 
-    // MAX_PAGES: 0 = fetch all
-    config.max_pages = 0;
-
+    if (tickerSet.size) {
+        config.stock_code = [...tickerSet].join(',');
+    }
     return config;
 }
 
 // ── Google Sync ────────────────────────────────────────────────────────────
 async function syncDrive() {
-    if (!state.adminToken) {
-        showLogin();
-        return;
-    }
     toast('Đang upload lên Google Drive...', 'info');
     const resp = await api('/api/gdrive/sync', { method: 'POST' }, true);
     if (!resp) return;
@@ -418,10 +445,6 @@ async function syncDrive() {
 }
 
 async function syncSheet() {
-    if (!state.adminToken) {
-        showLogin();
-        return;
-    }
     toast('Đang cập nhật Google Sheet...', 'info');
     const resp = await api('/api/gsheet/sync', { method: 'POST' }, true);
     if (!resp) return;
@@ -433,25 +456,17 @@ async function syncSheet() {
 }
 
 // ── Auth ───────────────────────────────────────────────────────────────────
-function updateAuthUI() {
-    const btnLogin = document.getElementById('btnLogin');
-    const btnLogout = document.getElementById('btnLogout');
-    if (state.adminToken) {
-        if (btnLogin) btnLogin.style.display = 'none';
-        if (btnLogout) btnLogout.style.display = '';
-    } else {
-        if (btnLogin) btnLogin.style.display = '';
-        if (btnLogout) btnLogout.style.display = 'none';
-    }
-}
-
-function showLogin() {
-    document.getElementById('loginOverlay').classList.add('visible');
-    document.getElementById('loginError').textContent = '';
-}
-
-function closeLogin() {
-    document.getElementById('loginOverlay').classList.remove('visible');
+async function showApp() {
+    document.getElementById('loginScreen').classList.remove('visible');
+    document.getElementById('appContainer').style.display = '';
+    await loadStockData();
+    await loadStats();
+    await loadHistory();
+    initYearSelects();
+    initTabs();
+    initTickerAutocomplete();
+    initHistorySearch();
+    connectWebSocket();
 }
 
 async function submitLogin(e) {
@@ -459,6 +474,7 @@ async function submitLogin(e) {
     const user = document.getElementById('loginUser').value.trim();
     const pass = document.getElementById('loginPass').value;
     const errEl = document.getElementById('loginError');
+    errEl.textContent = '';
 
     const resp = await fetch('/api/auth/login', {
         method: 'POST',
@@ -470,10 +486,8 @@ async function submitLogin(e) {
     if (data.ok && data.token) {
         state.adminToken = data.token;
         localStorage.setItem('stockreport_admin', data.token);
-        updateAuthUI();
-        closeLogin();
         document.getElementById('loginForm').reset();
-        toast('Đăng nhập thành công', 'success');
+        await showApp();
     } else {
         errEl.textContent = data.error || 'Đăng nhập thất bại';
     }
@@ -483,8 +497,9 @@ async function submitLogin(e) {
 function logout() {
     state.adminToken = null;
     localStorage.removeItem('stockreport_admin');
-    updateAuthUI();
-    toast('Đã đăng xuất', 'info');
+    document.getElementById('appContainer').style.display = 'none';
+    document.getElementById('loginScreen').classList.add('visible');
+    if (state.ws) state.ws.close();
 }
 
 // ── WebSocket ──────────────────────────────────────────────────────────────

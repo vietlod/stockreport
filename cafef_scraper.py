@@ -596,10 +596,12 @@ class CafeFScraper:
         log.info(f"  [{index+1}] {stock} | ICB:{icb_code} | {quarter_year} | {report_abbr}")
         log.info(f"  Cells: {entry.get('cells', [])[:4]}")
 
-        # Filter theo STOCK_CODE nếu có
-        if STOCK_CODE and stock and STOCK_CODE.upper() not in stock.upper():
-            log.info(f"  ⏭ Bỏ qua (không khớp mã: {STOCK_CODE})")
-            return
+        # Filter theo STOCK_CODE nếu có (hỗ trợ nhiều mã: ACB,FPT,VNM)
+        if STOCK_CODE and stock:
+            allowed = {s.strip().upper() for s in STOCK_CODE.split(",") if s.strip()}
+            if allowed and stock.upper() not in allowed:
+                log.info(f"  ⏭ Bỏ qua (không trong danh sách: {len(allowed)} mã)")
+                return
 
         pdf_urls = list(entry.get("pdf_links", []))
 
@@ -716,14 +718,15 @@ class CafeFScraper:
                 actual_max_pages = MAX_PAGES if MAX_PAGES > 0 else 10
                 page.wait_for_timeout(5000)
 
-            # Nếu có STOCK_CODE → dùng autocomplete search của CBTT
-            if STOCK_CODE and cbtt_info.get("exists"):
+            # Nếu có 1 mã CK → dùng autocomplete search của CBTT (nhiều mã thì filter ở _process_entry)
+            single_stock = STOCK_CODE.split(",")[0].strip() if STOCK_CODE else ""
+            if single_stock and "," not in STOCK_CODE and cbtt_info.get("exists"):
                 try:
                     page.evaluate(f"""
-                        IformationDisclosure.refInputAC.value = "{STOCK_CODE}";
+                        IformationDisclosure.refInputAC.value = "{single_stock}";
                         IformationDisclosure.handleFindDisclosure();
                     """)
-                    log.info(f"  ✏ Đã filter theo mã CK: {STOCK_CODE}")
+                    log.info(f"  ✏ Đã filter theo mã CK: {single_stock}")
                     page.wait_for_timeout(3000)
                     cbtt_info = self._wait_for_cbtt_module(page, timeout_ms=5000)
                     if cbtt_info.get("exists"):

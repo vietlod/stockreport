@@ -10,6 +10,31 @@
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
+    <!-- Login Screen (shown first) -->
+    <div class="login-screen" id="loginScreen">
+        <div class="login-screen-card">
+            <div class="login-screen-logo">
+                <svg width="48" height="48" viewBox="0 0 32 32" fill="none">
+                    <rect width="32" height="32" rx="8" fill="url(#g1)"/>
+                    <path d="M8 22V10l8-4 8 4v12l-8 4-8-4z" stroke="#fff" stroke-width="1.5" fill="none"/>
+                    <defs><linearGradient id="g1" x1="0" y1="0" x2="32" y2="32">
+                        <stop stop-color="#6366f1"/><stop offset="1" stop-color="#8b5cf6"/>
+                    </linearGradient></defs>
+                </svg>
+            </div>
+            <h1>CafeF CBTT</h1>
+            <p class="login-screen-sub">Report Manager</p>
+            <form id="loginForm" class="login-screen-form" onsubmit="return submitLogin(event)">
+                <input type="text" id="loginUser" placeholder="Tên đăng nhập" autocomplete="username" required>
+                <input type="password" id="loginPass" placeholder="Mật khẩu" autocomplete="current-password" required>
+                <button type="submit" class="btn btn-primary btn-block">Đăng nhập</button>
+            </form>
+            <p class="login-error" id="loginError"></p>
+        </div>
+    </div>
+
+    <!-- App (hidden until login) -->
+    <div class="app-container" id="appContainer" style="display:none">
     <!-- Header -->
     <header class="header">
         <div class="header-brand">
@@ -34,8 +59,10 @@
                 <div class="stat-chip"><span class="stat-val" id="statStocks">-</span><span class="stat-label">Stocks</span></div>
                 <div class="stat-chip"><span class="stat-val" id="statSize">-</span><span class="stat-label">MB</span></div>
             </div>
-            <button class="btn btn-sm btn-outline" id="btnLogin" onclick="showLogin()" title="Đăng nhập để Sync">Đăng nhập</button>
-            <button class="btn btn-sm btn-outline" id="btnLogout" onclick="logout()" style="display:none" title="Đăng xuất">Đăng xuất (tns)</button>
+            <button class="btn btn-sm btn-outline btn-logout" id="btnLogout" onclick="logout()" title="Đăng xuất">
+                <span class="btn-logout-text">Đăng xuất</span>
+                <span class="btn-logout-user">(tns)</span>
+            </button>
         </div>
     </header>
 
@@ -197,23 +224,7 @@
     <footer class="footer">
         <span>CafeF CBTT Report Manager v1.0 — Built with FastAPI + Vanilla JS</span>
     </footer>
-
-    <!-- Login Modal -->
-    <div class="login-overlay" id="loginOverlay">
-        <div class="login-modal">
-            <h2>Đăng nhập Admin</h2>
-            <p class="login-hint">Sync Drive/Sheet yêu cầu quyền admin</p>
-            <form id="loginForm" onsubmit="return submitLogin(event)">
-                <input type="text" id="loginUser" placeholder="Tên đăng nhập" autocomplete="username" required>
-                <input type="password" id="loginPass" placeholder="Mật khẩu" autocomplete="current-password" required>
-                <div class="login-actions">
-                    <button type="submit" class="btn btn-primary">Đăng nhập</button>
-                    <button type="button" class="btn btn-secondary" onclick="closeLogin()">Hủy</button>
-                </div>
-            </form>
-            <p class="login-error" id="loginError"></p>
-        </div>
-    </div>
+    </div><!-- .app-container -->
 
     <script src="/static/app.js"></script>
 </body>
