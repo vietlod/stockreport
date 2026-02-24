@@ -471,6 +471,7 @@ class GoogleSheetSync:
     """
 
     SHEET_NAME = "CAFEF"
+    SHEET_TAB = "DATA"  # Tab name cố định, không phụ thuộc locale Google Account
     HEADERS = ["TICKER", "TIME", "TYPE", "EXC", "IND", "INDEX"]
 
     def __init__(self):
@@ -487,16 +488,22 @@ class GoogleSheetSync:
         drive_service = build("drive", "v3", credentials=self.creds)
 
         if SHEET_FOLDER_ID:
-            # Search in folder
+            # Search in folder (supportsAllDrives cho Shared Drive)
             query = (
                 f"name='{self.SHEET_NAME}' and '{SHEET_FOLDER_ID}' in parents "
                 f"and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false"
             )
-            results = drive_service.files().list(q=query, fields="files(id)").execute()
+            results = drive_service.files().list(
+                q=query, fields="files(id)",
+                supportsAllDrives=True, includeItemsFromAllDrives=True,
+            ).execute()
             files = results.get("files", [])
 
             if files:
-                return files[0]["id"]
+                sheet_id = files[0]["id"]
+                # Đảm bảo tab DATA tồn tại (cho sheet cũ tạo trước khi fix)
+                self._ensure_data_tab(service, sheet_id)
+                return sheet_id
 
         # Create new spreadsheet
         body = {
@@ -509,22 +516,56 @@ class GoogleSheetSync:
                 "mimeType": "application/vnd.google-apps.spreadsheet",
                 "parents": [SHEET_FOLDER_ID],
             }
-            file = drive_service.files().create(body=body_drive, fields="id").execute()
+            file = drive_service.files().create(
+                body=body_drive, fields="id",
+                supportsAllDrives=True,
+            ).execute()
             sheet_id = file["id"]
         else:
             sheet = service.spreadsheets().create(body=body).execute()
             sheet_id = sheet["spreadsheetId"]
 
+        # Rename tab mặc định (locale-dependent) → tên cố định "DATA"
+        self._ensure_data_tab(service, sheet_id)
+
         # Set headers
         service.spreadsheets().values().update(
             spreadsheetId=sheet_id,
-            range="Sheet1!A1:F1",
+            range=f"{self.SHEET_TAB}!A1:F1",
             valueInputOption="RAW",
             body={"values": [self.HEADERS]},
         ).execute()
 
-        log.info(f"📊 Created Sheet: {self.SHEET_NAME} (ID: {sheet_id})")
+        log.info(f"📊 Created Sheet: {self.SHEET_NAME} (ID: {sheet_id}), tab: {self.SHEET_TAB}")
         return sheet_id
+
+    def _ensure_data_tab(self, service, sheet_id: str):
+        """Đảm bảo tab đầu tiên có tên 'DATA' (không phụ thuộc locale)."""
+        try:
+            spreadsheet = service.spreadsheets().get(
+                spreadsheetId=sheet_id,
+                fields="sheets.properties",
+            ).execute()
+            sheets = spreadsheet.get("sheets", [])
+            if not sheets:
+                return
+            first_tab = sheets[0]["properties"]
+            if first_tab["title"] != self.SHEET_TAB:
+                log.info(f"  🔄 Renaming tab '{first_tab['title']}' → '{self.SHEET_TAB}'")
+                service.spreadsheets().batchUpdate(
+                    spreadsheetId=sheet_id,
+                    body={"requests": [{
+                        "updateSheetProperties": {
+                            "properties": {
+                                "sheetId": first_tab["sheetId"],
+                                "title": self.SHEET_TAB,
+                            },
+                            "fields": "title",
+                        }
+                    }]},
+                ).execute()
+        except Exception as e:
+            log.warning(f"  ⚠ Error ensuring DATA tab: {e}")
 
     def sync(self, progress_callback=None) -> dict:
         """Sync download records lên Google Sheet.
@@ -592,7 +633,7 @@ class GoogleSheetSync:
         try:
             stored = service.spreadsheets().values().get(
                 spreadsheetId=sheet_id,
-                range="Sheet1!G1",
+                range=f"{self.SHEET_TAB}!G1",
             ).execute()
             stored_hash = (stored.get("values", [[]])[0] or [""])[0]
         except Exception:
@@ -608,7 +649,7 @@ class GoogleSheetSync:
 
         service.spreadsheets().values().clear(
             spreadsheetId=sheet_id,
-            range="Sheet1!A2:G",
+            range=f"{self.SHEET_TAB}!A2:G",
         ).execute()
 
         # Write headers (A1:F1) + hash (G1) + data
@@ -616,7 +657,7 @@ class GoogleSheetSync:
         all_values = [header_row] + data
         service.spreadsheets().values().update(
             spreadsheetId=sheet_id,
-            range="Sheet1!A1",
+            range=f"{self.SHEET_TAB}!A1",
             valueInputOption="RAW",
             body={"values": all_values},
         ).execute()

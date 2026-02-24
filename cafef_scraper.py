@@ -893,13 +893,31 @@ class CafeFScraper:
             # Bật network interception
             page.on("response", self._on_response)
 
-            # ── Phase 1: Load trang CBTT ────────────────────────────────
-            log.info(f"🌐 Đang mở trang: {CBTT_URL}")
-            try:
-                page.goto(CBTT_URL, wait_until="domcontentloaded", timeout=30000)
-            except PlaywrightTimeout:
-                log.warning("Timeout trên desktop, thử mobile version...")
-                page.goto(MOBILE_CBTT_URL, wait_until="domcontentloaded", timeout=30000)
+            # ── Phase 1: Load trang CBTT (retry + fallback) ────────────
+            urls_to_try = [
+                (CBTT_URL, "desktop"),
+                (MOBILE_CBTT_URL, "mobile"),
+            ]
+            page_loaded = False
+            for url, label in urls_to_try:
+                for attempt in range(1, 3):  # 2 attempts per URL
+                    try:
+                        log.info(f"🌐 [{label}] Attempt {attempt}: {url}")
+                        page.goto(url, wait_until="commit", timeout=60000)
+                        # Chờ DOM cơ bản render (không cần full load)
+                        page.wait_for_selector("body", timeout=15000)
+                        page_loaded = True
+                        log.info(f"✅ Page loaded ({label})")
+                        break
+                    except PlaywrightTimeout:
+                        log.warning(f"⏱ Timeout [{label}] attempt {attempt}")
+                        if attempt < 2:
+                            time.sleep(3)
+                if page_loaded:
+                    break
+
+            if not page_loaded:
+                raise RuntimeError("Không thể mở trang CBTT sau tất cả attempts")
 
             # ── Phase 2: Đợi IformationDisclosure JS module sẵn sàng ───
             log.info("⏳ Đợi module CBTT (IformationDisclosure) khởi tạo...")

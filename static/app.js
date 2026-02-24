@@ -548,20 +548,24 @@ async function buildScrapeConfig() {
 
 // ── Google Sync ────────────────────────────────────────────────────────────
 async function syncDrive() {
+    const btn = document.getElementById('btnSyncDrive');
     const status = await api('/api/oauth2/status');
     if (status && !status.connected) {
         toast('Chưa kết nối Google Drive. Đang chuyển đến trang cấp quyền...', 'info');
         startOAuthFlow('drive');
         return;
     }
+    btn.disabled = true;
     toast('Đang khởi tạo sync Drive...', 'info');
     const resp = await api('/api/gdrive/sync', { method: 'POST' }, true);
-    if (!resp) return;
+    if (!resp) { btn.disabled = false; return; }
     if (resp.status === 'started') {
         toast('☁ Sync Drive đang chạy nền. Có thể đóng tab.', 'info');
     } else if ((resp.error || '').includes('Chưa có Google OAuth token')) {
+        btn.disabled = false;
         startOAuthFlow('drive');
     } else {
+        btn.disabled = false;
         toast(resp.error || 'Lỗi upload', 'error');
     }
 }
@@ -577,18 +581,21 @@ async function startOAuthFlow(forWhat = 'drive') {
 }
 
 async function syncSheet() {
+    const btn = document.getElementById('btnSyncSheet');
     const status = await api('/api/oauth2/status');
     if (status && !status.connected) {
         toast('Chưa kết nối Google. Đang chuyển đến trang cấp quyền...', 'info');
         startOAuthFlow('sheet');
         return;
     }
+    btn.disabled = true;
     toast('Đang khởi tạo sync Sheet...', 'info');
     const resp = await api('/api/gsheet/sync', { method: 'POST' }, true);
-    if (!resp) return;
+    if (!resp) { btn.disabled = false; return; }
     if (resp.status === 'started') {
         toast('📊 Sync Sheet đang chạy nền. Có thể đóng tab.', 'info');
     } else {
+        btn.disabled = false;
         toast(resp.error || 'Lỗi cập nhật', 'error');
     }
 }
@@ -978,6 +985,9 @@ function handleSyncProgress(data) {
             bar.style.width = '100%';
             detail.innerHTML = `<span class="sync-stats">↑${u} uploaded | ⏭${s} skipped | ✖${e} errors</span>`;
             toast(`✅ Drive sync hoàn tất: ${u} uploaded, ${s} skipped, ${e} errors`, u > 0 ? 'success' : 'info');
+            // Re-enable button
+            const btnDrive = document.getElementById('btnSyncDrive');
+            if (btnDrive) btnDrive.disabled = false;
             // Auto-hide after 10s
             syncAutoHideTimers.drive = setTimeout(() => {
                 row.style.display = 'none';
@@ -1001,6 +1011,9 @@ function handleSyncProgress(data) {
             } else {
                 toast(`❌ Drive sync lỗi: ${err}`, 'error');
             }
+            // Re-enable button
+            const btnDrive = document.getElementById('btnSyncDrive');
+            if (btnDrive) btnDrive.disabled = false;
         }
     }
 
@@ -1053,6 +1066,9 @@ function handleSyncProgress(data) {
                     card.style.display = 'none';
                 }
             }, 10000);
+            // Re-enable button
+            const btnSheet = document.getElementById('btnSyncSheet');
+            if (btnSheet) btnSheet.disabled = false;
 
         } else if (st === 'error') {
             const err = data.error || 'Unknown';
@@ -1068,6 +1084,9 @@ function handleSyncProgress(data) {
             } else {
                 toast(`❌ Sheet sync lỗi: ${err}`, 'error');
             }
+            // Re-enable button
+            const btnSheet = document.getElementById('btnSyncSheet');
+            if (btnSheet) btnSheet.disabled = false;
         }
     }
 
