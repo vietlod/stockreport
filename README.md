@@ -64,6 +64,7 @@ DOWNLOAD_DELAY=0.5        # Delay giữa các PDF (giây)
 
 # Google Integration (OAuth2 only)
 GOOGLE_OAUTH_CREDENTIALS=./google_oauth_credentials.json
+OAUTH_REDIRECT_URI=https://stockreport.khoviet.com/oauth2callback
 GOOGLE_DRIVE_FOLDER_ID=<your-folder-id>
 GOOGLE_SHEET_FOLDER_ID=<your-folder-id>
 ```
@@ -80,6 +81,8 @@ File `google_oauth_credentials.json` là OAuth2 Client credentials (web type).
 5. Lần sau không cần consent (token tự refresh)
 
 **Redirect URI** trong Google Cloud Console: `https://stockreport.khoviet.com/oauth2callback`
+
+**Lưu ý**: Nếu OAuth client dùng chung với app khác (vd. pdf2vid), không dùng `include_granted_scopes` — gây lỗi "Scope has changed".
 
 ## Chạy ứng dụng
 
@@ -123,6 +126,10 @@ MAX_PAGES=0 python cafef_scraper.py
 | `POST` | `/api/scrape/stop` | Dừng job |
 | `POST` | `/api/gdrive/sync` | Upload PDF lên Google Drive (background) |
 | `GET` | `/api/gdrive/test` | Test upload 1 file → xác nhận Drive hoạt động |
+| `GET` | `/api/oauth2/start` | OAuth: trả URL redirect đến Google (yêu cầu admin) |
+| `GET` | `/oauth2callback` | OAuth callback: nhận code, lưu token, redirect về / |
+| `GET` | `/api/oauth2/status` | Kiểm tra đã có token chưa |
+| `GET` | `/api/oauth2/debug` | Debug: client_id + redirect_uri (troubleshooting) |
 | `POST` | `/api/gsheet/sync` | Sync metadata lên Google Sheets (background, incremental) |
 | `GET` | `/api/sync/status` | Trạng thái sync hiện tại |
 | `GET` | `/api/settings` | Lấy cài đặt + retention options |
@@ -193,6 +200,7 @@ Sync Drive/Sheet chạy trong background thread (daemon), **không phụ thuộc
   - Lỗi upload hiện trong progressNotes section
 - **Status API**: `GET /api/sync/status` trả trạng thái cả Drive và Sheet
 - **Diagnostic**: `GET /api/gdrive/test` — test upload 1 file PDF, trả kết quả chi tiết
+- **OAuth web flow**: production dùng redirect `https://stockreport.khoviet.com/oauth2callback`; `GET /api/oauth2/debug` để verify client_id + redirect_uri khớp Google Cloud Console
 
 ## Multi-Ticker Scraping
 
