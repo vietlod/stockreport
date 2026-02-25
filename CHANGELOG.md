@@ -2,6 +2,49 @@
 
 Tất cả thay đổi đáng chú ý của dự án được ghi nhận tại đây.
 
+## [1.2.1] - 2026-02-25
+
+### 🚀 Tính năng mới
+
+#### HQ History Filter Bar Redesign (`index.html`, `haiquan_app.js`)
+- **Search input**: tìm theo tên file (debounce 300ms)
+- **3 filter dropdowns**: Loại BC (SB/CT/DC), Mã BC (dynamic từ API), Trạng thái đồng bộ
+- **Count badge**: hiện tổng records
+- **Nút Dọn dẹp**: cleanup records + files theo filter (có xác nhận)
+- **Sort arrows**: visual indicator trên các cột sortable
+- Responsive: match layout CafeF tab
+
+#### HQ Sheet Sync (`haiquan_sync.py`) [NEW]
+- **`HaiQuanSheetSync`**: sync metadata Hải Quan lên Google Sheets
+  - Sheet: `"HAI QUAN"`, tab: `"DATA"`
+  - Columns: FILENAME (hyperlink → Drive) | YEAR | PERIOD | TYPE | CODE | SIZE | DATE
+  - Hash-based incremental: skip nếu data không thay đổi
+- **API**: `POST /api/haiquan/gsheet/sync`
+- **UI**: nút **Sync Sheet** cạnh Sync Drive trong HQ tab
+
+### 🐛 Bugfixes
+
+#### CafeF Sheet thiếu Drive hyperlinks (`google_sync.py`)
+- **Nguyên nhân**: `upload_all()` đánh dấu `drive_synced=1` nhưng không lưu `drive_file_id` vào SQLite
+- **Fix**: sau batch upload, re-scan tất cả files trên Drive → map `filename → file_id` → batch UPDATE `drive_file_id`
+- Áp dụng cùng fix cho HQ Drive sync (`haiquan_sync.py`)
+
+### 🔧 Cải tiến
+
+#### Server (`server.py`)
+- `GET /api/haiquan/history`: thêm `search` param (LIKE filename), thêm `filename` vào allowed sorts
+- `DELETE /api/haiquan/history/cleanup`: chuyển sang JSON body (phù hợp frontend)
+- `POST /api/haiquan/gsheet/sync`: endpoint mới cho HQ Sheet sync
+
+#### HQ Action Buttons (`haiquan_app.js`)
+- **Centralized disable**: `hqBgTask { scrape, drive, sheet }` + `hq_updateActionButtons()` quản lý 4 nút (Scrape/Stop/Sync Drive/Sync Sheet) — mutual disable khi bất kỳ task nào chạy nền
+
+#### Footer
+- Đổi `"CafeF CBTT Report Manager v1.0"` → `"Report Manager v1.0"` 
+- Thêm footer vào tab Hải Quan (giống CafeF)
+
+---
+
 ## [1.2.0] - 2026-02-25
 
 ### 🚀 Tính năng mới

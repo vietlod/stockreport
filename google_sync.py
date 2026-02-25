@@ -416,25 +416,13 @@ class GoogleDriveSync:
                 }
                 progress_callback(i + 1, len(pdf_files), filename, stats_ext)
 
-        # ── Mark synced files in SQLite ──────────────────────────────
-        synced_filenames = []
-        for pdf_path in pdf_files:
-            filename = pdf_path.name
-            if pdf_path.parent != PDF_DIR:
-                icb_folder = pdf_path.parent.name
-                relative_key = f"{icb_folder}/{pdf_path.name}"
-            else:
-                relative_key = pdf_path.name
-            # File is on Drive if it was uploaded or skipped (already exists)
-            remote_info = existing_remote.get(relative_key)
-            local_size = pdf_path.stat().st_size if pdf_path.exists() else 0
-            if remote_info and remote_info["size"] == local_size:
-                synced_filenames.append(filename)
+        # ── Re-scan Drive to get file IDs (for Sheet hyperlinks) ─────
+        try:
+            final_remote = self._list_existing_files_recursive(service, DRIVE_FOLDER_ID)
+        except Exception:
+            final_remote = existing_remote  # fallback to pre-upload snapshot
 
-        # Also include newly uploaded files
-        # (they are on Drive now even though they weren't in existing_remote)
-        # Since total = uploaded + skipped + errors, and we want uploaded + skipped:
-        # Simpler: mark ALL files except errors as synced
+        # ── Mark synced files + populate drive_file_id in SQLite ──────
         all_filenames = [p.name for p in pdf_files]
         if all_filenames:
             try:
@@ -442,14 +430,28 @@ class GoogleDriveSync:
                 if db_path.exists():
                     import sqlite3 as _sqlite3
                     conn = _sqlite3.connect(str(db_path))
-                    # Mark all processed files as synced (batch)
-                    conn.executemany(
-                        "UPDATE downloads SET drive_synced = 1 WHERE filename = ?",
-                        [(fn,) for fn in all_filenames]
-                    )
+                    # Build filename → drive_file_id map
+                    file_id_map = {}
+                    for pdf_path in pdf_files:
+                        if pdf_path.parent != PDF_DIR:
+                            relative_key = f"{pdf_path.parent.name}/{pdf_path.name}"
+                        else:
+                            relative_key = pdf_path.name
+                        remote_info = final_remote.get(relative_key)
+                        if remote_info:
+                            file_id_map[pdf_path.name] = remote_info["id"]
+
+                    # Batch update: drive_synced=1 + drive_file_id
+                    for fn in all_filenames:
+                        drive_id = file_id_map.get(fn, "")
+                        conn.execute(
+                            "UPDATE downloads SET drive_synced = 1, drive_file_id = ? WHERE filename = ?",
+                            (drive_id, fn)
+                        )
                     conn.commit()
                     conn.close()
-                    log.info(f"📋 Marked {len(all_filenames)} files as drive_synced in DB")
+                    log.info(f"📋 Marked {len(all_filenames)} files as drive_synced "
+                             f"({len(file_id_map)} with drive_file_id) in DB")
             except Exception as e:
                 log.warning(f"⚠ Failed to mark drive_synced: {e}")
 

@@ -368,7 +368,7 @@
         </main>
 
         <footer class="footer">
-            <span>CafeF CBTT Report Manager v1.0 — Built with FastAPI + Vanilla JS</span>
+            <span>Report Manager v1.0 — Built with FastAPI + Vanilla JS</span>
         </footer>
     </div><!-- .app-container -->
 
@@ -487,6 +487,13 @@
                     </svg>
                     Sync Drive
                 </button>
+                <button class="btn btn-secondary" id="hqBtnSyncSheet" onclick="hq_syncSheet()">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                        <path
+                            d="M4 2h12a2 2 0 012 2v12a2 2 0 01-2 2H4a2 2 0 01-2-2V4a2 2 0 012-2zm0 4v10h12V6H4zm2 2h3v2H6V8zm5 0h3v2h-3V8zm-5 4h3v2H6v-2zm5 0h3v2h-3v-2z" />
+                    </svg>
+                    Sync Sheet
+                </button>
             </div>
         </section>
 
@@ -559,37 +566,48 @@
                 </svg>
                 Lịch sử tải — Hải quan
             </h2>
-            <div class="history-filters">
-                <select id="hqFilterYear" class="select-input select-sm" onchange="hq_loadHistory()">
-                    <option value="">Năm</option>
-                </select>
-                <select id="hqFilterType" class="select-input select-sm" onchange="hq_loadHistory()">
+            <div class="history-controls">
+                <input type="text" id="hqHistorySearch" placeholder="Tìm theo tên file..." class="search-input">
+                <select id="hqFilterType" class="filter-select" onchange="hq_applyHistoryFilters()">
                     <option value="">Loại BC</option>
-                    <option value="SB">SB</option>
-                    <option value="CT">CT</option>
-                    <option value="DC">DC</option>
+                    <option value="SB">SB (Sơ bộ)</option>
+                    <option value="CT">CT (Chính thức)</option>
+                    <option value="DC">DC (Điều chỉnh)</option>
                 </select>
-                <select id="hqFilterCode" class="select-input select-sm" onchange="hq_loadHistory()">
+                <select id="hqFilterCode" class="filter-select" onchange="hq_applyHistoryFilters()">
                     <option value="">Mã BC</option>
                 </select>
-                <select id="hqFilterSync" class="select-input select-sm" onchange="hq_loadHistory()">
-                    <option value="">Đồng bộ</option>
-                    <option value="1">✅ Đã sync</option>
-                    <option value="0">❌ Chưa sync</option>
+                <select id="hqFilterSync" class="filter-select" onchange="hq_applyHistoryFilters()">
+                    <option value="">Đồng bộ: Tất cả</option>
+                    <option value="1">✅ Đã đồng bộ</option>
+                    <option value="0">✖ Chưa đồng bộ</option>
                 </select>
+                <span class="history-count" id="hqHistoryCount"></span>
+                <button class="btn-cleanup" id="hqBtnCleanup" onclick="hq_cleanupFiltered()" style="display:none"
+                    title="Xóa files theo filter hiện tại">
+                    🗑 Dọn dẹp
+                </button>
             </div>
             <div class="table-wrap">
                 <table class="data-table" id="hqHistoryTable">
                     <thead>
                         <tr>
-                            <th class="sortable" data-sort="filename" onclick="hq_sort('filename')">Tên file</th>
-                            <th class="sortable" data-sort="year" onclick="hq_sort('year')">Năm</th>
+                            <th class="sortable" data-sort="filename" onclick="hq_sort('filename')">Tên file
+                                <span class="sort-arrow">↕</span>
+                            </th>
+                            <th class="sortable" data-sort="year" onclick="hq_sort('year')">Năm
+                                <span class="sort-arrow">↕</span>
+                            </th>
                             <th>Kỳ</th>
                             <th>Loại</th>
                             <th>Mã BC</th>
-                            <th class="sortable" data-sort="file_size" onclick="hq_sort('file_size')">Dung lượng</th>
+                            <th class="sortable" data-sort="file_size" onclick="hq_sort('file_size')">Dung lượng
+                                <span class="sort-arrow">↕</span>
+                            </th>
                             <th>Đồng bộ</th>
-                            <th class="sortable" data-sort="downloaded_at" onclick="hq_sort('downloaded_at')">Ngày tải
+                            <th class="sortable active-sort" data-sort="downloaded_at"
+                                onclick="hq_sort('downloaded_at')">Ngày tải
+                                <span class="sort-arrow">▼</span>
                             </th>
                         </tr>
                     </thead>
@@ -602,6 +620,10 @@
             </div>
             <div class="pagination" id="hqPagination"></div>
         </section>
+
+        <footer class="footer">
+            <span>Report Manager v1.0 — Built with FastAPI + Vanilla JS</span>
+        </footer>
     </main>
 
     </div> <!-- /appContainer -->

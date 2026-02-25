@@ -1399,6 +1399,7 @@ async def hq_get_history(
     report_type: str = Query(None),
     report_code: str = Query(None),
     drive_synced: int = Query(None, ge=0, le=1),
+    search: str = Query(None),
     sort_by: str = Query("downloaded_at"),
     sort_dir: str = Query("desc"),
     limit: int = Query(100),
@@ -1429,10 +1430,14 @@ async def hq_get_history(
     if drive_synced is not None:
         conditions.append("drive_synced = ?")
         params.append(drive_synced)
+    if search:
+        conditions.append("filename LIKE ?")
+        params.append(f"%{search}%")
 
     where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
     allowed_sorts = {
+        "filename": "filename",
         "year": "year",
         "month": "month",
         "report_code": "report_code",
@@ -1491,13 +1496,15 @@ async def hq_get_history_filters():
 
 @app.delete("/api/haiquan/history/cleanup")
 async def hq_cleanup_history(
-    year: int = Query(None),
-    report_type: str = Query(None),
-    report_code: str = Query(None),
-    drive_synced: int = Query(None, ge=0, le=1),
+    request: Request,
     _admin=Depends(require_admin),
 ):
-    """Xóa HaiQuan records + files theo filter."""
+    """Xóa HaiQuan records + files theo filter (JSON body)."""
+    body = await request.json()
+    year = body.get("year")
+    report_type = body.get("report_type")
+    report_code = body.get("report_code")
+    drive_synced = body.get("drive_synced")
     conn = get_hq_db()
     if not conn:
         return {"deleted": 0, "freed_bytes": 0, "error": "DB not found"}
@@ -1624,6 +1631,22 @@ async def hq_sync_status():
         "running": haiquan_sync_job.running,
         "drive": haiquan_sync_job.progress if haiquan_sync_job.progress else None,
     }
+
+
+@app.post("/api/haiquan/gsheet/sync")
+async def hq_gsheet_sync(_: bool = Depends(require_admin)):
+    """Sync HaiQuan metadata lên Google Sheets."""
+    try:
+        _check_google_sheet_config()
+        from haiquan_sync import HaiQuanSheetSync
+        syncer = HaiQuanSheetSync()
+        result = syncer.sync()
+        return result
+    except ValueError as e:
+        return JSONResponse(status_code=400, content={"error": str(e)})
+    except Exception as e:
+        log.error(f"HQ Sheet sync error: {e}", exc_info=True)
+        return JSONResponse(status_code=500, content={"error": str(e)})
 
 
 # ── WebSocket ───────────────────────────────────────────────────────────────

@@ -11,17 +11,19 @@ const hqState = {
     historyLimit: 50,
     sortBy: 'downloaded_at',
     sortDir: 'desc',
-    filterYear: '',
+    historySearch: '',
     filterType: '',
     filterCode: '',
     filterSync: '',
 };
+const hqBgTask = { scrape: false, drive: false, sheet: false };
 
 // ── Init (called lazily on first tab switch) ───────────────────────────────
 async function hq_init() {
+    hq_initHistorySearch();
+    await hq_loadFilters();
     await hq_loadStats();
     await hq_loadHistory();
-    await hq_loadFilters();
 }
 
 // ── HQ Stats ───────────────────────────────────────────────────────────────
@@ -36,18 +38,23 @@ async function hq_loadStats() {
     document.getElementById('hqStatSize').textContent = s.total_size_mb || 0;
 }
 
-// ── HQ Filters ─────────────────────────────────────────────────────────────
+// ── HQ Search & Filters ────────────────────────────────────────────────────
+function hq_initHistorySearch() {
+    const input = document.getElementById('hqHistorySearch');
+    if (!input) return;
+    let debounce = null;
+    input.addEventListener('input', () => {
+        clearTimeout(debounce);
+        debounce = setTimeout(() => {
+            hqState.historyPage = 1;
+            hq_loadHistory();
+        }, 300);
+    });
+}
+
 async function hq_loadFilters() {
     const data = await api('/api/haiquan/history/filters');
     if (!data) return;
-
-    const yearSel = document.getElementById('hqFilterYear');
-    (data.years || []).forEach(y => {
-        const opt = document.createElement('option');
-        opt.value = y;
-        opt.textContent = y;
-        yearSel.appendChild(opt);
-    });
 
     const codeSel = document.getElementById('hqFilterCode');
     (data.report_codes || []).forEach(c => {
@@ -58,12 +65,52 @@ async function hq_loadFilters() {
     });
 }
 
-// ── HQ History ─────────────────────────────────────────────────────────────
-async function hq_loadHistory() {
-    hqState.filterYear = document.getElementById('hqFilterYear').value;
+function hq_applyHistoryFilters() {
     hqState.filterType = document.getElementById('hqFilterType').value;
     hqState.filterCode = document.getElementById('hqFilterCode').value;
     hqState.filterSync = document.getElementById('hqFilterSync').value;
+    hqState.historyPage = 1;
+    // Show/hide cleanup button
+    const hasFilter = hqState.filterType || hqState.filterCode || hqState.filterSync !== '';
+    const btn = document.getElementById('hqBtnCleanup');
+    if (btn) btn.style.display = hasFilter ? '' : 'none';
+    hq_loadHistory();
+}
+
+async function hq_cleanupFiltered() {
+    const filters = {};
+    if (hqState.filterType) filters.report_type = hqState.filterType;
+    if (hqState.filterCode) filters.report_code = hqState.filterCode;
+    if (hqState.filterSync !== '') filters.drive_synced = parseInt(hqState.filterSync);
+    if (Object.keys(filters).length === 0) {
+        toast('Cần chọn ít nhất 1 filter để dọn dẹp', 'warning');
+        return;
+    }
+    // Get count first
+    const params = new URLSearchParams({ limit: 1, offset: 0 });
+    if (filters.report_type) params.set('report_type', filters.report_type);
+    if (filters.report_code) params.set('report_code', filters.report_code);
+    if (filters.drive_synced !== undefined) params.set('drive_synced', filters.drive_synced);
+    const peek = await api(`/api/haiquan/history?${params}`);
+    const count = peek?.total || 0;
+    if (count === 0) { toast('Không có records nào', 'info'); return; }
+
+    if (!confirm(`Xác nhận xóa ${count} records + files tương ứng?`)) return;
+
+    const resp = await api('/api/haiquan/history/cleanup', {
+        method: 'DELETE',
+        body: JSON.stringify(filters),
+    }, true);
+    if (resp) {
+        toast(`🗑 Đã xóa ${resp.deleted_records || 0} records, ${resp.deleted_files || 0} files`, 'success');
+        hq_loadStats();
+        hq_loadHistory();
+    }
+}
+
+// ── HQ History ─────────────────────────────────────────────────────────────
+async function hq_loadHistory() {
+    hqState.historySearch = (document.getElementById('hqHistorySearch')?.value || '').trim();
 
     const params = new URLSearchParams({
         limit: hqState.historyLimit,
@@ -72,7 +119,7 @@ async function hq_loadHistory() {
         sort_dir: hqState.sortDir,
     });
 
-    if (hqState.filterYear) params.set('year', hqState.filterYear);
+    if (hqState.historySearch) params.set('search', hqState.historySearch);
     if (hqState.filterType) params.set('report_type', hqState.filterType);
     if (hqState.filterCode) params.set('report_code', hqState.filterCode);
     if (hqState.filterSync !== '') params.set('drive_synced', hqState.filterSync);
@@ -104,6 +151,10 @@ async function hq_loadHistory() {
             <td class="date-cell">${hq_formatDate(r.downloaded_at)}</td>
         </tr>`;
     }).join('');
+
+    // Update count badge
+    const countEl = document.getElementById('hqHistoryCount');
+    if (countEl) countEl.textContent = `${data.total} records`;
 
     hq_renderPagination(data.total);
 }
@@ -137,6 +188,30 @@ function hq_sort(col) {
     }
     hqState.historyPage = 1;
     hq_loadHistory();
+    hq_updateSortArrows();
+}
+
+function hq_updateSortArrows() {
+    document.querySelectorAll('#hqHistoryTable th.sortable').forEach(th => {
+        const arrow = th.querySelector('.sort-arrow');
+        const col = th.dataset.sort;
+        if (col === hqState.sortBy) {
+            th.classList.add('active-sort');
+            if (arrow) arrow.textContent = hqState.sortDir === 'asc' ? '▲' : '▼';
+        } else {
+            th.classList.remove('active-sort');
+            if (arrow) arrow.textContent = '↕';
+        }
+    });
+}
+
+function hq_updateActionButtons() {
+    const scraping = hqBgTask.scrape;
+    const syncing = hqBgTask.drive || hqBgTask.sheet;
+    document.getElementById('hqBtnScrape').disabled = scraping || syncing;
+    document.getElementById('hqBtnStop').disabled = !scraping;
+    document.getElementById('hqBtnSyncDrive').disabled = scraping || syncing;
+    document.getElementById('hqBtnSyncSheet').disabled = scraping || syncing;
 }
 
 // ── HQ Scrape ──────────────────────────────────────────────────────────────
@@ -156,9 +231,8 @@ async function hq_startScrape() {
 
     if (resp && resp.status === 'started') {
         document.getElementById('hqProgressCard').style.display = '';
-        document.getElementById('hqBtnScrape').disabled = true;
-        document.getElementById('hqBtnStop').disabled = false;
-        document.getElementById('hqBtnSyncDrive').disabled = true;
+        hqBgTask.scrape = true;
+        hq_updateActionButtons();
         toast('🚀 Bắt đầu tải Hải quan...', 'info');
     } else {
         toast(resp?.error || 'Không thể bắt đầu', 'error');
@@ -173,14 +247,14 @@ async function hq_stopScrape() {
 
 // ── HQ Drive Sync ──────────────────────────────────────────────────────────
 async function hq_syncDrive() {
-    document.getElementById('hqBtnSyncDrive').disabled = true;
-    document.getElementById('hqBtnScrape').disabled = true;
+    hqBgTask.drive = true;
+    hq_updateActionButtons();
     toast('☁ Đang khởi tạo sync Drive Hải quan...', 'info');
 
     const resp = await api('/api/haiquan/gdrive/sync', { method: 'POST' }, true);
     if (!resp) {
-        document.getElementById('hqBtnSyncDrive').disabled = false;
-        document.getElementById('hqBtnScrape').disabled = false;
+        hqBgTask.drive = false;
+        hq_updateActionButtons();
         return;
     }
 
@@ -188,9 +262,29 @@ async function hq_syncDrive() {
         document.getElementById('hqSyncCard').style.display = '';
         toast('☁ Sync Drive Hải quan đang chạy nền', 'info');
     } else {
-        document.getElementById('hqBtnSyncDrive').disabled = false;
-        document.getElementById('hqBtnScrape').disabled = false;
+        hqBgTask.drive = false;
+        hq_updateActionButtons();
         toast(resp.error || 'Lỗi sync', 'error');
+    }
+}
+
+// ── HQ Sheet Sync ──────────────────────────────────────────────────────────
+async function hq_syncSheet() {
+    hqBgTask.sheet = true;
+    hq_updateActionButtons();
+    toast('📊 Đang sync Sheet Hải quan...', 'info');
+
+    const resp = await api('/api/haiquan/gsheet/sync', { method: 'POST' }, true);
+    hqBgTask.sheet = false;
+    hq_updateActionButtons();
+
+    if (!resp) return;
+    if (resp.error) {
+        toast('❌ Lỗi sync Sheet: ' + resp.error, 'error');
+    } else if (resp.skipped) {
+        toast('⏭ Sheet Hải quan không có thay đổi', 'info');
+    } else {
+        toast(`✅ Sync Sheet Hải quan hoàn tất: ${resp.rows || 0} rows`, 'success');
     }
 }
 
@@ -216,9 +310,8 @@ function hq_handleProgress(data) {
     document.getElementById('hqProgressCounts').textContent = `${current} / ${total}`;
 
     if (status === 'done' || status === 'stopped' || status === 'error') {
-        document.getElementById('hqBtnScrape').disabled = false;
-        document.getElementById('hqBtnStop').disabled = true;
-        document.getElementById('hqBtnSyncDrive').disabled = false;
+        hqBgTask.scrape = false;
+        hq_updateActionButtons();
 
         if (status === 'done') {
             toast('✅ Tải Hải quan hoàn tất!', 'success');
@@ -269,8 +362,8 @@ function hq_handleSyncProgress(data) {
 
     const status = data.status || '';
     if (status === 'done' || status === 'error') {
-        document.getElementById('hqBtnSyncDrive').disabled = false;
-        document.getElementById('hqBtnScrape').disabled = false;
+        hqBgTask.drive = false;
+        hq_updateActionButtons();
 
         if (status === 'done') {
             toast(`✅ Sync Drive Hải quan hoàn tất: ${data.uploaded || 0} files`, 'success');

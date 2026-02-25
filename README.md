@@ -114,7 +114,8 @@ python server.py
 
 Giao diện cho phép:
 - **Tab CafeF CBTT**: Lọc mã CK/sàn/ngành/chỉ số → Scrape → Sync Drive/Sheet
-- **Tab Hải Quan**: Lọc nguồn/năm/loại BC → Tải PDF → Sync Drive
+- **Tab Hải Quan**: Lọc nguồn/năm/loại BC → Tải PDF → Sync Drive/Sheet
+  - Filter bar: search + Loại BC + Mã BC + Trạng thái + count + Dọn dẹp
 - **Thống kê** download theo sàn/ngành/chỉ số (CafeF) hoặc năm/loại/mã BC (HQ)
 - **Sync** lên Google Drive và Google Sheets (chạy nền, không cần giữ tab)
 - **Dọn dẹp** files theo filter (sàn, ngành, sync status) với xác nhận
@@ -158,11 +159,12 @@ MAX_PAGES=0 python cafef_scraper.py
 | `POST` | `/api/haiquan/scrape` | Bắt đầu tải HQ `{"source":"xlsx","year_from":2009}` |
 | `GET` | `/api/haiquan/scrape/status` | Trạng thái job |
 | `POST` | `/api/haiquan/scrape/stop` | Dừng job |
-| `GET` | `/api/haiquan/history` | Lịch sử tải (filter: year, report_type, report_code, drive_synced) |
+| `GET` | `/api/haiquan/history` | Lịch sử tải (filter: search, report_type, report_code, drive_synced; sort: filename, year, file_size, downloaded_at) |
 | `GET` | `/api/haiquan/history/filters` | Filter options (years, types, codes, periods) |
-| `DELETE` | `/api/haiquan/history/cleanup` | Xóa records + files theo filter |
+| `DELETE` | `/api/haiquan/history/cleanup` | Xóa records + files theo filter (JSON body) |
 | `GET` | `/api/haiquan/stats` | Thống kê theo năm/loại/mã BC |
 | `POST` | `/api/haiquan/gdrive/sync` | Upload HQ PDFs lên Drive |
+| `POST` | `/api/haiquan/gsheet/sync` | Sync HQ metadata lên Google Sheets |
 | `GET` | `/api/haiquan/sync/status` | Trạng thái sync |
 
 ### Chung
@@ -322,7 +324,17 @@ SQLite tại `pdf/haiquan/_haiquan_history.db`:
 - Upload flat structure lên folder riêng (`HQ_GOOGLE_DRIVE_FOLDER_ID`)
 - Reuse OAuth credentials (chung token với CafeF)
 - Incremental: batch-list files trên Drive, skip nếu đã tồn tại + cùng size
+- Sau upload: re-scan Drive → populate `drive_file_id` vào SQLite (cho Sheet hyperlinks)
 - Progress realtime qua WebSocket (`haiquan_sync_progress`)
+
+### HQ Sheet Sync
+
+- **`HaiQuanSheetSync`** (`haiquan_sync.py`): sync metadata lên Google Sheets
+  - Sheet: `"HAI QUAN"`, tab: `"DATA"`
+  - Columns: FILENAME (hyperlink → Drive) | YEAR | PERIOD | TYPE | CODE | SIZE | DATE
+  - Hash-based incremental: skip nếu data không thay đổi
+  - Reuse OAuth credentials + `SHEET_FOLDER_ID` (chung folder với CafeF Sheet)
+- API: `POST /api/haiquan/gsheet/sync`
 
 ## License
 
