@@ -875,6 +875,28 @@ function logout() {
     try { google.accounts.id.disableAutoSelect(); } catch (_) { }
 }
 
+// ── Flow Switching (CafeF ↔ Hải Quan) ─────────────────────────────────────
+function switchFlow(flow) {
+    const cafefMain = document.getElementById('cafef-main');
+    const hqMain = document.getElementById('haiquan-main');
+    const tabs = document.querySelectorAll('.nav-tab');
+
+    tabs.forEach(t => t.classList.toggle('active', t.dataset.flow === flow));
+
+    if (flow === 'haiquan') {
+        cafefMain.style.display = 'none';
+        hqMain.style.display = '';
+        // Lazy init: load HQ data on first visit
+        if (typeof hq_init === 'function' && !window._hqInitDone) {
+            window._hqInitDone = true;
+            hq_init();
+        }
+    } else {
+        cafefMain.style.display = '';
+        hqMain.style.display = 'none';
+    }
+}
+
 // ── WebSocket + Polling fallback ───────────────────────────────────────────
 let wsReconnectDelay = 3000;
 const WS_MAX_DELAY = 60000;
@@ -895,6 +917,9 @@ function connectWebSocket() {
             const data = JSON.parse(msg.data);
             if (data.type === 'progress') handleProgress(data);
             else if (data.type === 'sync_progress') handleSyncProgress(data);
+            // Forward Hải Quan messages to haiquan_app.js handlers
+            else if (data.type === 'haiquan_progress' && typeof hq_handleProgress === 'function') hq_handleProgress(data);
+            else if (data.type === 'haiquan_sync_progress' && typeof hq_handleSyncProgress === 'function') hq_handleSyncProgress(data);
         } catch (e) {
             console.error('WS parse error', e);
         }

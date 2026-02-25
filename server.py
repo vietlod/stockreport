@@ -487,7 +487,207 @@ class SyncJob:
 
 sync_job = SyncJob()
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Hải Quan — Job State (HOÀN TOÀN TÁCH BIỆT với CafeF)
+# ══════════════════════════════════════════════════════════════════════════════
+
+HQ_PDF_DIR = Path(os.getenv("HQ_PDF_DIR", "./pdf/haiquan"))
+
+
+class HaiQuanScrapeJob:
+    """Background scrape job cho Hải Quan — ISOLATED from CafeF ScrapeJob."""
+
+    def __init__(self):
+        self.running = False
+        self.should_stop = False
+        self.progress = {}
+        self.thread = None
+        self.loop = None
+
+    def start(self, config: dict, loop):
+        if self.running:
+            return False
+        self.running = True
+        self.should_stop = False
+        self.progress = {
+            "status": "running",
+            "phase": "starting",
+            "total": 0, "current": 0,
+            "downloaded": 0, "skipped": 0, "failed": 0,
+            "current_file": "",
+            "started_at": datetime.now().isoformat(),
+        }
+        self.loop = loop
+        self.thread = threading.Thread(
+            target=self._run_scrape, args=(config,), daemon=True
+        )
+        self.thread.start()
+        return True
+
+    def stop(self):
+        self.should_stop = True
+
+    def _broadcast(self, data: dict):
+        if self.loop:
+            asyncio.run_coroutine_threadsafe(
+                ws_manager.broadcast(data), self.loop
+            )
+
+    def _run_scrape(self, config: dict):
+        try:
+            from haiquan_scraper import HaiQuanScraper
+
+            scraper = HaiQuanScraper(pdf_dir=HQ_PDF_DIR)
+
+            def on_progress(current, total, filename, phase):
+                if self.should_stop:
+                    scraper.stop()
+                self.progress.update({
+                    "current": current,
+                    "total": total,
+                    "current_file": filename,
+                    "phase": phase,
+                    "downloaded": scraper.downloaded,
+                    "skipped": scraper.skipped,
+                    "failed": scraper.failed,
+                })
+                self._broadcast({
+                    "type": "haiquan_progress",
+                    **self.progress,
+                })
+
+            result = scraper.run(config=config, on_progress=on_progress)
+            self.progress.update({
+                "status": "completed",
+                "phase": "done",
+                **result,
+                "completed_at": datetime.now().isoformat(),
+            })
+            scraper.close()
+
+        except Exception as e:
+            self.progress["status"] = "error"
+            self.progress["error"] = str(e)
+            log.error(f"HaiQuan scrape error: {e}", exc_info=True)
+        finally:
+            self.running = False
+            self._broadcast({"type": "haiquan_progress", **self.progress})
+
+
+class HaiQuanSyncJob:
+    """Background Drive sync job cho Hải Quan — ISOLATED from CafeF SyncJob."""
+
+    def __init__(self):
+        self._drive_running = False
+        self._drive_progress = {}
+        self._drive_thread = None
+        self.loop = None
+
+    @property
+    def running(self):
+        return self._drive_running
+
+    @property
+    def progress(self):
+        return self._drive_progress
+
+    def start_drive(self, loop):
+        if self._drive_running:
+            return False
+        self._drive_running = True
+        self.loop = loop
+        self._drive_progress = {
+            "sync_type": "haiquan_drive",
+            "status": "running",
+            "phase": "starting",
+            "uploaded": 0, "skipped": 0, "errors": 0,
+            "total": 0,
+            "started_at": datetime.now().isoformat(),
+        }
+        self._drive_thread = threading.Thread(
+            target=self._run_drive, daemon=True
+        )
+        self._drive_thread.start()
+        return True
+
+    def _broadcast(self, data: dict):
+        if self.loop:
+            asyncio.run_coroutine_threadsafe(
+                ws_manager.broadcast(data), self.loop
+            )
+
+    def _run_drive(self):
+        try:
+            from haiquan_sync import HaiQuanDriveSync
+            sync = HaiQuanDriveSync()
+
+            def on_phase(phase, detail):
+                self._drive_progress.update({
+                    "phase": phase,
+                    "total": detail.get("total_local", 0),
+                    "total_remote": detail.get("total_remote", 0),
+                })
+                self._broadcast({
+                    "type": "haiquan_sync_progress",
+                    **self._drive_progress,
+                })
+
+            def on_progress(current, total, filename, stats):
+                elapsed = stats.get("elapsed_s", 0)
+                processed = stats["uploaded"] + stats["errors"]
+                if processed > 0 and current < total:
+                    avg_per_file = elapsed / processed
+                    remaining = total - current
+                    eta_s = round(avg_per_file * remaining)
+                else:
+                    eta_s = 0
+                self._drive_progress.update({
+                    "phase": "uploading",
+                    "uploaded": stats["uploaded"],
+                    "skipped": stats["skipped"],
+                    "errors": stats["errors"],
+                    "total": total,
+                    "current_file": filename,
+                    "current_index": current,
+                    "action": stats.get("action", ""),
+                    "error_msg": stats.get("error_msg", ""),
+                    "eta_s": eta_s,
+                })
+                self._broadcast({
+                    "type": "haiquan_sync_progress",
+                    **self._drive_progress,
+                })
+
+            stats = sync.upload_all(
+                progress_callback=on_progress, phase_callback=on_phase
+            )
+            self._drive_progress.update({
+                "status": "completed",
+                "phase": "done",
+                "uploaded": stats["uploaded"],
+                "skipped": stats["skipped"],
+                "errors": stats["errors"],
+                "total": stats["total"],
+                "completed_at": datetime.now().isoformat(),
+            })
+        except Exception as e:
+            self._drive_progress["status"] = "error"
+            self._drive_progress["error"] = str(e)
+            log.error(f"HaiQuan Drive sync error: {e}", exc_info=True)
+        finally:
+            self._drive_running = False
+            self._broadcast({
+                "type": "haiquan_sync_progress",
+                **self._drive_progress,
+            })
+
+
+haiquan_scrape_job = HaiQuanScrapeJob()
+haiquan_sync_job = HaiQuanSyncJob()
+
 # ── Helper: Query SQLite ────────────────────────────────────────────────────
+
 def get_db():
     db_path = PDF_DIR / "_download_history.db"
     if not db_path.exists():
@@ -1143,7 +1343,291 @@ async def sync_status():
     }
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# Hải Quan — API Routes (HOÀN TOÀN TÁCH BIỆT với CafeF)
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+def get_hq_db():
+    """Get HaiQuan SQLite connection (separate from CafeF)."""
+    db_path = HQ_PDF_DIR / "_haiquan_history.db"
+    if not db_path.exists():
+        return None
+    conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+@app.post("/api/haiquan/scrape")
+async def hq_start_scrape(config: dict = {}):
+    """Bắt đầu Hải Quan scrape job."""
+    if haiquan_scrape_job.running:
+        return JSONResponse(
+            status_code=409,
+            content={"error": "HaiQuan scrape job đang chạy"}
+        )
+    loop = asyncio.get_event_loop()
+    started = haiquan_scrape_job.start(config, loop)
+    if started:
+        return {"status": "started", "config": config}
+    return JSONResponse(status_code=500, content={"error": "Failed to start"})
+
+
+@app.get("/api/haiquan/scrape/status")
+async def hq_scrape_status():
+    """Trạng thái HaiQuan scrape job."""
+    return {
+        "running": haiquan_scrape_job.running,
+        "progress": haiquan_scrape_job.progress,
+    }
+
+
+@app.post("/api/haiquan/scrape/stop")
+async def hq_stop_scrape():
+    """Dừng HaiQuan scrape job."""
+    if not haiquan_scrape_job.running:
+        return {"status": "not_running"}
+    haiquan_scrape_job.stop()
+    return {"status": "stopping"}
+
+
+@app.get("/api/haiquan/history")
+async def hq_get_history(
+    year: int = Query(None),
+    month: int = Query(None),
+    period: str = Query(None),
+    report_type: str = Query(None),
+    report_code: str = Query(None),
+    drive_synced: int = Query(None, ge=0, le=1),
+    sort_by: str = Query("downloaded_at"),
+    sort_dir: str = Query("desc"),
+    limit: int = Query(100),
+    offset: int = Query(0),
+):
+    """Query HaiQuan download history."""
+    conn = get_hq_db()
+    if not conn:
+        return {"records": [], "total": 0}
+
+    conditions = []
+    params = []
+    if year is not None:
+        conditions.append("year = ?")
+        params.append(year)
+    if month is not None:
+        conditions.append("month = ?")
+        params.append(month)
+    if period:
+        conditions.append("period = ?")
+        params.append(period.upper())
+    if report_type:
+        conditions.append("report_type = ?")
+        params.append(report_type.upper())
+    if report_code:
+        conditions.append("report_code = ?")
+        params.append(report_code.upper())
+    if drive_synced is not None:
+        conditions.append("drive_synced = ?")
+        params.append(drive_synced)
+
+    where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+
+    allowed_sorts = {
+        "year": "year",
+        "month": "month",
+        "report_code": "report_code",
+        "report_type": "report_type",
+        "downloaded_at": "downloaded_at",
+        "file_size": "file_size",
+    }
+    sort_col = allowed_sorts.get(sort_by, "downloaded_at")
+    sort_direction = "ASC" if sort_dir.lower() == "asc" else "DESC"
+
+    total = conn.execute(
+        f"SELECT COUNT(*) FROM haiquan_downloads {where}", params
+    ).fetchone()[0]
+
+    rows = conn.execute(
+        f"SELECT * FROM haiquan_downloads {where} "
+        f"ORDER BY {sort_col} {sort_direction} LIMIT ? OFFSET ?",
+        params + [limit, offset]
+    ).fetchall()
+
+    conn.close()
+    return {"records": [dict(r) for r in rows], "total": total}
+
+
+@app.get("/api/haiquan/history/filters")
+async def hq_get_history_filters():
+    """Filter options cho HaiQuan history."""
+    conn = get_hq_db()
+    if not conn:
+        return {"years": [], "report_types": [], "report_codes": [], "periods": []}
+
+    years = [r[0] for r in conn.execute(
+        "SELECT DISTINCT year FROM haiquan_downloads WHERE year > 0 ORDER BY year DESC"
+    ).fetchall()]
+    report_types = [r[0] for r in conn.execute(
+        "SELECT DISTINCT report_type FROM haiquan_downloads "
+        "WHERE report_type IS NOT NULL AND report_type != '' ORDER BY report_type"
+    ).fetchall()]
+    report_codes = [r[0] for r in conn.execute(
+        "SELECT DISTINCT report_code FROM haiquan_downloads "
+        "WHERE report_code IS NOT NULL AND report_code != '' ORDER BY report_code"
+    ).fetchall()]
+    periods = [r[0] for r in conn.execute(
+        "SELECT DISTINCT period FROM haiquan_downloads "
+        "WHERE period IS NOT NULL AND period != '' ORDER BY period"
+    ).fetchall()]
+
+    conn.close()
+    return {
+        "years": years,
+        "report_types": report_types,
+        "report_codes": report_codes,
+        "periods": periods,
+    }
+
+
+@app.delete("/api/haiquan/history/cleanup")
+async def hq_cleanup_history(
+    year: int = Query(None),
+    report_type: str = Query(None),
+    report_code: str = Query(None),
+    drive_synced: int = Query(None, ge=0, le=1),
+    _admin=Depends(require_admin),
+):
+    """Xóa HaiQuan records + files theo filter."""
+    conn = get_hq_db()
+    if not conn:
+        return {"deleted": 0, "freed_bytes": 0, "error": "DB not found"}
+
+    conditions = []
+    params = []
+    if year is not None:
+        conditions.append("year = ?")
+        params.append(year)
+    if report_type:
+        conditions.append("report_type = ?")
+        params.append(report_type.upper())
+    if report_code:
+        conditions.append("report_code = ?")
+        params.append(report_code.upper())
+    if drive_synced is not None:
+        conditions.append("drive_synced = ?")
+        params.append(drive_synced)
+
+    if not conditions:
+        conn.close()
+        return {"deleted": 0, "freed_bytes": 0,
+                "error": "Cần ít nhất 1 filter để tránh xóa toàn bộ"}
+
+    where = f"WHERE {' AND '.join(conditions)}"
+    rows = conn.execute(
+        f"SELECT id, filename, file_size FROM haiquan_downloads {where}", params
+    ).fetchall()
+
+    if not rows:
+        conn.close()
+        return {"deleted": 0, "freed_bytes": 0}
+
+    freed = 0
+    for r in rows:
+        file_path = HQ_PDF_DIR / r["filename"]
+        try:
+            if file_path.exists():
+                freed += r["file_size"] or 0
+                file_path.unlink()
+        except Exception as e:
+            log.warning(f"🗑 Cannot delete {file_path}: {e}")
+
+    conn.execute(f"DELETE FROM haiquan_downloads {where}", params)
+    conn.commit()
+    deleted = conn.total_changes
+    conn.close()
+
+    log.info(f"🗑 HQ Cleanup: {deleted} records, freed {freed / 1024 / 1024:.1f}MB")
+    return {"deleted": deleted, "freed_bytes": freed}
+
+
+@app.get("/api/haiquan/stats")
+async def hq_get_stats():
+    """Thống kê HaiQuan downloads."""
+    conn = get_hq_db()
+    if not conn:
+        return {"by_year": [], "by_type": [], "by_code": [], "summary": {}}
+
+    by_year = [dict(r) for r in conn.execute("""
+        SELECT year, COUNT(*) as count, SUM(file_size) as total_size
+        FROM haiquan_downloads WHERE year > 0
+        GROUP BY year ORDER BY year DESC
+    """).fetchall()]
+
+    by_type = [dict(r) for r in conn.execute("""
+        SELECT report_type, COUNT(*) as count, SUM(file_size) as total_size
+        FROM haiquan_downloads WHERE report_type != ''
+        GROUP BY report_type ORDER BY count DESC
+    """).fetchall()]
+
+    by_code = [dict(r) for r in conn.execute("""
+        SELECT report_code, COUNT(*) as count, SUM(file_size) as total_size
+        FROM haiquan_downloads WHERE report_code != ''
+        GROUP BY report_code ORDER BY count DESC
+    """).fetchall()]
+
+    summary = conn.execute("""
+        SELECT COUNT(*) as total,
+               COUNT(DISTINCT year) as unique_years,
+               COUNT(DISTINCT report_code) as unique_codes,
+               SUM(file_size) as total_size
+        FROM haiquan_downloads
+    """).fetchone()
+
+    conn.close()
+    return {
+        "by_year": by_year,
+        "by_type": by_type,
+        "by_code": by_code,
+        "summary": {
+            "total_files": summary["total"],
+            "unique_years": summary["unique_years"],
+            "unique_codes": summary["unique_codes"],
+            "total_size_mb": round((summary["total_size"] or 0) / 1024 / 1024, 1),
+        },
+    }
+
+
+@app.post("/api/haiquan/gdrive/sync")
+async def hq_gdrive_sync(_: bool = Depends(require_admin)):
+    """Upload HaiQuan PDFs lên Google Drive (folder riêng)."""
+    try:
+        _check_google_drive_config()
+        loop = asyncio.get_event_loop()
+        started = haiquan_sync_job.start_drive(loop)
+        if not started:
+            return JSONResponse(
+                status_code=409,
+                content={"error": "HQ Drive sync đang chạy. Vui lòng đợi."}
+            )
+        return {"status": "started", "sync_type": "haiquan_drive"}
+    except ValueError as e:
+        return JSONResponse(status_code=400, content={"error": str(e)})
+    except Exception as e:
+        log.error(f"HQ Drive sync error: {e}", exc_info=True)
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.get("/api/haiquan/sync/status")
+async def hq_sync_status():
+    """Trạng thái HaiQuan sync."""
+    return {
+        "running": haiquan_sync_job.running,
+        "drive": haiquan_sync_job.progress if haiquan_sync_job.progress else None,
+    }
+
+
 # ── WebSocket ───────────────────────────────────────────────────────────────
+
 
 @app.websocket("/ws/progress")
 async def websocket_progress(ws: WebSocket):

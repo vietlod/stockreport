@@ -2,6 +2,76 @@
 
 Tất cả thay đổi đáng chú ý của dự án được ghi nhận tại đây.
 
+## [1.2.0] - 2026-02-25
+
+### 🚀 Tính năng mới
+
+#### Tab Hải Quan — Clone & Isolate từ CafeF CBTT
+
+Thêm tab **"Hải Quan"** hoàn toàn tách biệt với CafeF CBTT, tải và đồng bộ báo cáo thống kê hải quan (PDF) từ `customs.gov.vn`.
+
+##### Kiến trúc tách biệt (6 layers)
+
+| Layer | CafeF | Hải Quan |
+|-------|-------|----------|
+| Scraper | `cafef_scraper.py` | `haiquan_scraper.py` [NEW] |
+| Database | `pdf/_download_history.db` | `pdf/haiquan/_haiquan_history.db` |
+| PDF Dir | `pdf/{ICB}/` (subfolders) | `pdf/haiquan/` (flat) |
+| Server Jobs | `ScrapeJob`, `SyncJob` | `HaiQuanScrapeJob`, `HaiQuanSyncJob` |
+| API Prefix | `/api/*` | `/api/haiquan/*` |
+| WS Types | `progress`, `sync_progress` | `haiquan_progress`, `haiquan_sync_progress` |
+| Frontend | `app.js` | `haiquan_app.js` [NEW] |
+| Drive Folder | `GOOGLE_DRIVE_FOLDER_ID` | `HQ_GOOGLE_DRIVE_FOLDER_ID` |
+
+##### Core Backend (`haiquan_scraper.py`) [NEW]
+- **`parse_filename(url)`**: phân tích URL → tên file chuẩn `{LOẠI_BC}_{KỲ_BC}_{MÃ_BC}.pdf`
+  - LOẠI_BC: `SB` (Sơ bộ), `CT` (Chính thức/Final), `DC` (Điều chỉnh)
+  - KỲ_BC: `{YYYY}T{M}` (tháng), `{YYYY}T{M}K1/K2` (nửa tháng), `{YYYY}Q{N}` (quý)
+  - Edge cases: numeric prefix trong filename, year fallback cho quarter reports
+- **`HaiQuanDownloadHistory`**: SQLite riêng (`_haiquan_history.db`) với schema riêng (year, month, quarter, period, report_code, report_type, drive_synced, drive_file_id)
+- **`download_pdf()`**: retry logic, resume support, history check
+- **`load_legacy_urls()`**: import URLs từ `docs/haiquan/haiquan.xlsx`
+- **`HaiQuanScraper`**: orchestrator chính
+
+##### Drive Sync (`haiquan_sync.py`) [NEW]
+- **`HaiQuanDriveSync`**: upload flat structure lên Drive folder riêng
+- Reuse OAuth credentials, incremental (skip nếu file đã tồn tại + cùng size)
+- Non-resumable cho files < 5MB, resumable cho lớn hơn
+
+##### Server Integration (`server.py`)
+- **`HaiQuanScrapeJob`**: background thread tách biệt, broadcast `haiquan_progress`
+- **`HaiQuanSyncJob`**: background thread tách biệt, broadcast `haiquan_sync_progress`
+- **9 API endpoints**:
+
+| Method | Endpoint | Mô tả |
+|--------|----------|-------|
+| `POST` | `/api/haiquan/scrape` | Bắt đầu tải HQ |
+| `GET` | `/api/haiquan/scrape/status` | Trạng thái job |
+| `POST` | `/api/haiquan/scrape/stop` | Dừng job |
+| `GET` | `/api/haiquan/history` | Lịch sử tải (phân trang, filter, sort) |
+| `GET` | `/api/haiquan/history/filters` | Filter options (years, report_types, report_codes, periods) |
+| `DELETE` | `/api/haiquan/history/cleanup` | Xóa records + files theo filter |
+| `GET` | `/api/haiquan/stats` | Thống kê theo năm/loại/mã BC |
+| `POST` | `/api/haiquan/gdrive/sync` | Upload HQ PDFs lên Drive |
+| `GET` | `/api/haiquan/sync/status` | Trạng thái sync |
+
+##### Frontend (`index.html`, `haiquan_app.js`, `style.css`, `app.js`)
+- **Header Tab Navigation**: `CafeF CBTT` | `Hải Quan` — chuyển flow qua `switchFlow()`
+- **HQ Filter Panel**: nguồn dữ liệu (XLSX/Web/All), năm từ-đến, loại BC
+- **Action Buttons**: Bắt đầu tải / Dừng / Sync Drive — mutual disable
+- **Progress Card**: realtime progress qua WebSocket (`haiquan_progress`)
+- **Sync Card**: Drive sync progress qua WebSocket (`haiquan_sync_progress`)
+- **Stats Grid**: tổng files, số năm, mã BC, dung lượng
+- **History Table**: sortable, filterable (năm, loại, mã BC, sync status), pagination
+
+##### Environment Variables (`.env`)
+- `HQ_PDF_DIR=./pdf/haiquan` — thư mục lưu PDF Hải quan
+- `HQ_GOOGLE_DRIVE_FOLDER_ID` — Google Drive folder riêng cho Hải quan
+- `HQ_HEADLESS=true` — chế độ headless
+- `HQ_DOWNLOAD_DELAY=1.0` — delay giữa các downloads
+
+---
+
 ## [1.1.4] - 2026-02-25
 
 ### 🐛 Bugfixes

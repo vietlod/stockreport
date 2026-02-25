@@ -4,8 +4,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CafeF CBTT Report Manager</title>
-    <meta name="description" content="Quản lý tải báo cáo CBTT từ CafeF - Lọc theo mã, sàn, ngành ICB, chỉ số">
+    <title>Report Manager</title>
+    <meta name="description" content="Quản lý tải báo cáo CBTT từ CafeF & Thống kê Hải quan">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/style.css">
@@ -28,8 +28,8 @@
                     </defs>
                 </svg>
             </div>
-            <h1>CafeF CBTT</h1>
-            <p class="login-screen-sub">Report Manager</p>
+            <h1>Report Manager</h1>
+            <p class="login-screen-sub">CafeF CBTT & Hải Quan</p>
             <div id="googleSignInBtn" class="google-signin-wrap"></div>
             <p class="login-error" id="loginError"></p>
         </div>
@@ -54,9 +54,28 @@
                     </svg>
                 </div>
                 <div>
-                    <h1>CafeF CBTT</h1>
-                    <span class="header-sub">Report Manager</span>
+                    <h1>Report Manager</h1>
+                    <span class="header-sub">CafeF CBTT & Hải Quan</span>
                 </div>
+                <nav class="nav-tabs" id="mainNavTabs">
+                    <button class="nav-tab active" data-flow="cafef" onclick="switchFlow('cafef')">
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                            <path
+                                d="M4 1.5H3a2 2 0 00-2 2V14a2 2 0 002 2h10a2 2 0 002-2V3.5a2 2 0 00-2-2h-1v1h1a1 1 0 011 1V14a1 1 0 01-1 1H3a1 1 0 01-1-1V3.5a1 1 0 011-1h1v-1z" />
+                            <path d="M9.5 1a.5.5 0 01.5.5v1a.5.5 0 01-.5.5h-3a.5.5 0 01-.5-.5v-1a.5.5 0 01.5-.5h3z" />
+                        </svg>
+                        CafeF CBTT
+                    </button>
+                    <button class="nav-tab" data-flow="haiquan" onclick="switchFlow('haiquan')">
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                            <path
+                                d="M14.5 3a.5.5 0 01.5.5v9a.5.5 0 01-.5.5h-13a.5.5 0 01-.5-.5v-9a.5.5 0 01.5-.5h13zm-13-1A1.5 1.5 0 000 3.5v9A1.5 1.5 0 001.5 14h13a1.5 1.5 0 001.5-1.5v-9A1.5 1.5 0 0014.5 2h-13z" />
+                            <path
+                                d="M5 8a.5.5 0 01.5-.5h5a.5.5 0 010 1h-5A.5.5 0 015 8zm0 2a.5.5 0 01.5-.5h2a.5.5 0 010 1h-2A.5.5 0 015 10z" />
+                        </svg>
+                        Hải Quan
+                    </button>
+                </nav>
             </div>
             <div class="header-right">
                 <div class="header-stats" id="headerStats">
@@ -110,7 +129,7 @@
             </div>
         </header>
 
-        <main class="main">
+        <main class="main" id="cafef-main">
             <!-- Filter Panel -->
             <section class="card filter-card">
                 <h2 class="card-title">
@@ -403,8 +422,193 @@
         </div>
     </div>
 
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <!-- Hải Quan Main (TÁCH BIỆT HOÀN TOÀN với CafeF) -->
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <main class="main" id="haiquan-main" style="display:none">
+        <!-- HQ Filter Panel -->
+        <section class="card filter-card">
+            <h2 class="card-title">
+                <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
+                    <path d="M2 4h16l-6 7v5l-4 2v-7L2 4z" />
+                </svg>
+                Bộ lọc Hải quan
+            </h2>
+            <div class="filter-row">
+                <div class="filter-group">
+                    <label>Nguồn dữ liệu</label>
+                    <select id="hqSourceSelect" class="select-input select-sm">
+                        <option value="xlsx">File XLSX (2009-2022)</option>
+                        <option value="web">Web Crawl (2022+)</option>
+                        <option value="all">Tất cả</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label>Năm từ</label>
+                    <input type="number" id="hqYearFrom" class="input-sm" value="2009" min="2009" max="2025">
+                </div>
+                <div class="filter-group">
+                    <label>Năm đến</label>
+                    <input type="number" id="hqYearTo" class="input-sm" value="2025" min="2009" max="2025">
+                </div>
+                <div class="filter-group">
+                    <label>Loại BC</label>
+                    <select id="hqReportTypeFilter" class="select-input select-sm">
+                        <option value="">Tất cả</option>
+                        <option value="SB">SB (Sơ bộ)</option>
+                        <option value="CT">CT (Chính thức)</option>
+                        <option value="DC">DC (Điều chỉnh)</option>
+                    </select>
+                </div>
+            </div>
+        </section>
+
+        <!-- HQ Actions -->
+        <section class="card">
+            <div class="actions-bar">
+                <button class="btn btn-primary" id="hqBtnScrape" onclick="hq_startScrape()">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                        <path
+                            d="M3.612 15.443c-.386.198-.824-.149-.746-.592l.83-4.73L.173 6.765c-.329-.314-.158-.888.283-.95l4.898-.696L7.538.792c.197-.39.73-.39.927 0l2.184 4.327 4.898.696c.441.062.612.636.282.95l-3.522 3.356.83 4.73c.078.443-.36.79-.746.592L8 13.187l-4.389 2.256z" />
+                    </svg>
+                    Bắt đầu tải
+                </button>
+                <button class="btn btn-danger" id="hqBtnStop" onclick="hq_stopScrape()" disabled>
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                        <path
+                            d="M5 3.5h6A1.5 1.5 0 0112.5 5v6a1.5 1.5 0 01-1.5 1.5H5A1.5 1.5 0 013.5 11V5A1.5 1.5 0 015 3.5z" />
+                    </svg>
+                    Dừng
+                </button>
+                <button class="btn btn-secondary" id="hqBtnSyncDrive" onclick="hq_syncDrive()">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                        <path
+                            d="M6 12H2.5A2.5 2.5 0 010 9.5a2.5 2.5 0 011.747-2.384A4.501 4.501 0 018 3a4.5 4.5 0 014.5 4.5h.5A2.5 2.5 0 0115.5 10a2.5 2.5 0 01-2 2.45V12h-2V8.354l1.146 1.146.708-.708L11 6.44l-2.354 2.353.708.708L10.5 8.354V12H8V8.354l1.146 1.146.708-.708L7.5 6.44l-2.354 2.353.708.708L7 8.354V12H6z" />
+                    </svg>
+                    Sync Drive
+                </button>
+            </div>
+        </section>
+
+        <!-- HQ Progress Card -->
+        <section class="card progress-card" id="hqProgressCard" style="display:none">
+            <h2 class="card-title">
+                <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
+                    <path d="M10 2a8 8 0 100 16 8 8 0 000-16zM2 10a8 8 0 1116 0 8 8 0 01-16 0z" />
+                    <path d="M10 5v5l3 3" stroke="currentColor" stroke-width="1.5" fill="none" />
+                </svg>
+                Tiến trình tải Hải quan
+            </h2>
+            <div class="progress-info">
+                <div class="progress-file" id="hqProgressFile">Đang chuẩn bị...</div>
+                <div class="progress-stats" id="hqProgressStats"></div>
+            </div>
+            <div class="progress-bar-wrap">
+                <div class="progress-bar" id="hqProgressBar" style="width:0%"></div>
+            </div>
+            <div class="progress-counts" id="hqProgressCounts"></div>
+        </section>
+
+        <!-- HQ Sync Status Card -->
+        <section class="card sync-card" id="hqSyncCard" style="display:none">
+            <h2 class="card-title">
+                <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
+                    <path
+                        d="M11.534 7h3.932a.25.25 0 01.192.41l-1.966 2.36a.25.25 0 01-.384 0l-1.966-2.36a.25.25 0 01.192-.41zm-5 4h3.932a.25.25 0 00.192-.41L8.692 8.23a.25.25 0 00-.384 0L6.342 10.59a.25.25 0 00.192.41z" />
+                </svg>
+                Đồng bộ Drive — Hải quan
+            </h2>
+            <div class="sync-info">
+                <div class="sync-phase" id="hqSyncPhase">Đang chuẩn bị...</div>
+                <div class="sync-file" id="hqSyncFile"></div>
+                <div class="sync-eta" id="hqSyncEta"></div>
+            </div>
+            <div class="progress-bar-wrap">
+                <div class="progress-bar" id="hqSyncBar" style="width:0%"></div>
+            </div>
+            <div class="sync-counts" id="hqSyncCounts"></div>
+        </section>
+
+        <!-- HQ Stats -->
+        <section class="card">
+            <h2 class="card-title">
+                <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
+                    <path
+                        d="M4 11H2v3h2v-3zm5-4H7v7h2V7zm5-5h-2v12h2V2zm-2-1a1 1 0 00-1 1v12a1 1 0 001 1h2a1 1 0 001-1V2a1 1 0 00-1-1h-2zM6 7a1 1 0 011-1h2a1 1 0 011 1v7a1 1 0 01-1 1H7a1 1 0 01-1-1V7zM1 11a1 1 0 011-1h2a1 1 0 011 1v3a1 1 0 01-1 1H2a1 1 0 01-1-1v-3z" />
+                </svg>
+                Thống kê Hải quan
+            </h2>
+            <div class="stats-grid" id="hqStatsGrid">
+                <div class="stat-item"><span class="stat-val" id="hqStatTotal">-</span><span class="stat-label">Tổng
+                        files</span></div>
+                <div class="stat-item"><span class="stat-val" id="hqStatYears">-</span><span
+                        class="stat-label">Năm</span></div>
+                <div class="stat-item"><span class="stat-val" id="hqStatCodes">-</span><span class="stat-label">Mã
+                        BC</span></div>
+                <div class="stat-item"><span class="stat-val" id="hqStatSize">-</span><span class="stat-label">MB</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- HQ History Table -->
+        <section class="card">
+            <h2 class="card-title">
+                <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
+                    <path
+                        d="M1 3.5A1.5 1.5 0 012.5 2h11A1.5 1.5 0 0115 3.5v8a1.5 1.5 0 01-1.5 1.5h-11A1.5 1.5 0 011 11.5v-8z" />
+                </svg>
+                Lịch sử tải — Hải quan
+            </h2>
+            <div class="history-filters">
+                <select id="hqFilterYear" class="select-input select-sm" onchange="hq_loadHistory()">
+                    <option value="">Năm</option>
+                </select>
+                <select id="hqFilterType" class="select-input select-sm" onchange="hq_loadHistory()">
+                    <option value="">Loại BC</option>
+                    <option value="SB">SB</option>
+                    <option value="CT">CT</option>
+                    <option value="DC">DC</option>
+                </select>
+                <select id="hqFilterCode" class="select-input select-sm" onchange="hq_loadHistory()">
+                    <option value="">Mã BC</option>
+                </select>
+                <select id="hqFilterSync" class="select-input select-sm" onchange="hq_loadHistory()">
+                    <option value="">Đồng bộ</option>
+                    <option value="1">✅ Đã sync</option>
+                    <option value="0">❌ Chưa sync</option>
+                </select>
+            </div>
+            <div class="table-wrap">
+                <table class="data-table" id="hqHistoryTable">
+                    <thead>
+                        <tr>
+                            <th class="sortable" data-sort="filename" onclick="hq_sort('filename')">Tên file</th>
+                            <th class="sortable" data-sort="year" onclick="hq_sort('year')">Năm</th>
+                            <th>Kỳ</th>
+                            <th>Loại</th>
+                            <th>Mã BC</th>
+                            <th class="sortable" data-sort="file_size" onclick="hq_sort('file_size')">Dung lượng</th>
+                            <th>Đồng bộ</th>
+                            <th class="sortable" data-sort="downloaded_at" onclick="hq_sort('downloaded_at')">Ngày tải
+                            </th>
+                        </tr>
+                    </thead>
+                    <tbody id="hqHistoryBody">
+                        <tr>
+                            <td colspan="8" class="empty-row">Chưa có dữ liệu</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="pagination" id="hqPagination"></div>
+        </section>
+    </main>
+
+    </div> <!-- /appContainer -->
+
     <div id="toastContainer"></div>
     <script src="/static/app.js"></script>
+    <script src="/static/haiquan_app.js"></script>
 </body>
 
 </html>
