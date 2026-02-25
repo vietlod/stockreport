@@ -61,6 +61,7 @@ PDF_DIR=./pdf
 HEADLESS=true
 PAGE_DELAY=1.5            # Delay giữa các trang (giây)
 DOWNLOAD_DELAY=0.5        # Delay giữa các PDF (giây)
+BROWSER_RESTART_INTERVAL=50  # Restart browser mỗi N tickers (chống memory leak)
 
 # Google Sign-In (optional)
 GOOGLE_CLIENT_ID=
@@ -232,6 +233,13 @@ IformationDisclosure.handleFindDisclosure();
 1. **DOM Polling**: Sau khi search, polling bảng HTML mỗi 500ms (max 10s) đợi dòng đầu hiển thị đúng ticker
 2. **Pre-filter**: Entries extracted được lọc — chỉ giữ `stock_code == current_ticker`
 3. **Safety net**: `_process_entry()` so khớp chính xác `self.current_ticker`
+
+**Crash Recovery** (300-1000+ tickers):
+- **Periodic restart**: browser tự restart mỗi `BROWSER_RESTART_INTERVAL` tickers (default 50) để giải phóng memory Chromium
+- **Per-ticker isolation**: mỗi ticker xử lý trong `try/except` riêng — 1 lỗi không dừng toàn bộ
+- **Auto-recovery**: detect "Page crashed" → restart browser → retry ticker 1 lần
+- **Chromium flags**: `--disable-dev-shm-usage`, `--disable-gpu`, `--no-sandbox` tăng stability
+- **Tracking**: `crashed_tickers`, `skipped_tickers`, `browser_restarts` trong report JSON + WebSocket progress
 
 ## License
 

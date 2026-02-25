@@ -42,6 +42,7 @@ TIME_TO_QUARTER = ""
 HEADLESS = os.getenv("HEADLESS", "true").lower() == "true"
 PAGE_DELAY = float(os.getenv("PAGE_DELAY", "1.5"))  # delay giữa các trang (giây)
 DOWNLOAD_DELAY = float(os.getenv("DOWNLOAD_DELAY", "0.5"))  # delay giữa các PDF
+BROWSER_RESTART_INTERVAL = int(os.getenv("BROWSER_RESTART_INTERVAL", "50"))  # restart browser mỗi N tickers
 
 BASE_URL = "https://cafef.vn"
 CBTT_URL = "https://cafef.vn/du-lieu/cong-bo-thong-tin.chn"
@@ -425,6 +426,99 @@ class CafeFScraper:
         self.current_ticker = ""   # Ticker đang scrape
         self.ticker_index = 0      # Thứ tự ticker hiện tại (1-based)
         self.total_tickers = 0     # Tổng số ticker cần scrape
+        # Crash recovery tracking
+        self.crashed_tickers = []  # Tickers bị crash
+        self.skipped_tickers = []  # Tickers bị skip do lỗi
+        self.browser_restarts = 0  # Số lần restart browser
+        # Internal browser state (managed by _create_browser)
+        self._pw = None
+        self._browser = None
+        self._context = None
+        self._page = None
+
+    def _create_browser(self, pw):
+        """Tạo browser mới với Chromium stability flags.
+        
+        Đóng browser cũ nếu có trước khi tạo mới.
+        Returns (browser, context, page)
+        """
+        # Đóng browser cũ nếu có
+        if self._browser:
+            try:
+                self._browser.close()
+            except Exception:
+                pass
+
+        browser = pw.chromium.launch(
+            headless=HEADLESS,
+            args=[
+                "--disable-dev-shm-usage",   # Tránh /dev/shm giới hạn → crash
+                "--disable-gpu",             # Giảm tải GPU process
+                "--no-sandbox",              # Stability trên server
+                "--disable-extensions",      # Giảm memory footprint
+                "--disable-background-timer-throttling",
+                "--disable-renderer-backgrounding",
+            ],
+        )
+        context = browser.new_context(
+            viewport={"width": 1280, "height": 900},
+            user_agent=(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/120.0.0.0 Safari/537.36"
+            ),
+        )
+        page = context.new_page()
+        page.on("response", self._on_response)
+
+        self._browser = browser
+        self._context = context
+        self._page = page
+        return browser, context, page
+
+    def _load_cbtt_page(self, page) -> dict:
+        """Load trang CBTT với retry + fallback, trả về cbtt_info."""
+        urls_to_try = [
+            (CBTT_URL, "desktop"),
+            (MOBILE_CBTT_URL, "mobile"),
+        ]
+        page_loaded = False
+        for url, label in urls_to_try:
+            for attempt in range(1, 3):  # 2 attempts per URL
+                try:
+                    log.info(f"🌐 [{label}] Attempt {attempt}: {url}")
+                    page.goto(url, wait_until="commit", timeout=60000)
+                    page.wait_for_selector("body", timeout=15000)
+                    page_loaded = True
+                    log.info(f"✅ Page loaded ({label})")
+                    break
+                except PlaywrightTimeout:
+                    log.warning(f"⏱ Timeout [{label}] attempt {attempt}")
+                    if attempt < 2:
+                        time.sleep(3)
+                except Exception as e:
+                    log.warning(f"⚠ Error [{label}] attempt {attempt}: {e}")
+                    if attempt < 2:
+                        time.sleep(3)
+            if page_loaded:
+                break
+
+        if not page_loaded:
+            raise RuntimeError("Không thể mở trang CBTT sau tất cả attempts")
+
+        log.info("⏳ Đợi module CBTT (IformationDisclosure) khởi tạo...")
+        cbtt_info = self._wait_for_cbtt_module(page, timeout_ms=15000)
+
+        if not cbtt_info.get("exists"):
+            log.warning("  ⚠ Module CBTT không tìm thấy, thử scrape trực tiếp...")
+            page.wait_for_timeout(5000)
+
+        return cbtt_info
+
+    def _is_page_crashed(self, error) -> bool:
+        """Detect if error is a page crash (not just timeout)."""
+        err_str = str(error).lower()
+        return "page crashed" in err_str or "target closed" in err_str or "context or browser has been closed" in err_str
 
     def _on_response(self, response):
         """Callback bắt network responses để tìm API endpoint."""
@@ -854,6 +948,11 @@ class CafeFScraper:
         - Không có STOCK_CODE → scrape tất cả (behavior cũ)
         - 1 mã CK → search CafeF + scrape
         - Nhiều mã CK (nhóm ngành/sàn/chỉ số) → lần lượt search từng mã
+
+        Crash recovery:
+        - Per-ticker try/catch → 1 ticker crash không dừng toàn bộ
+        - Periodic browser restart mỗi BROWSER_RESTART_INTERVAL tickers
+        - Auto-restart browser khi detect page crash
         """
         log.info("=" * 60)
         log.info("CafeF CBTT PDF Scraper")
@@ -865,6 +964,7 @@ class CafeFScraper:
         log.info(f"  HEADLESS      : {HEADLESS}")
         log.info(f"  PAGE_DELAY    : {PAGE_DELAY}s")
         log.info(f"  DOWNLOAD_DELAY: {DOWNLOAD_DELAY}s")
+        log.info(f"  BROWSER_RESTART: mỗi {BROWSER_RESTART_INTERVAL} tickers")
 
         # Parse danh sách tickers
         ticker_list = [s.strip().upper() for s in STOCK_CODE.split(",") if s.strip()] if STOCK_CODE else []
@@ -879,53 +979,11 @@ class CafeFScraper:
         stock_registry.load()
 
         with sync_playwright() as pw:
-            browser = pw.chromium.launch(headless=HEADLESS)
-            context = browser.new_context(
-                viewport={"width": 1280, "height": 900},
-                user_agent=(
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/120.0.0.0 Safari/537.36"
-                ),
-            )
-            page = context.new_page()
+            self._pw = pw
+            browser, context, page = self._create_browser(pw)
 
-            # Bật network interception
-            page.on("response", self._on_response)
-
-            # ── Phase 1: Load trang CBTT (retry + fallback) ────────────
-            urls_to_try = [
-                (CBTT_URL, "desktop"),
-                (MOBILE_CBTT_URL, "mobile"),
-            ]
-            page_loaded = False
-            for url, label in urls_to_try:
-                for attempt in range(1, 3):  # 2 attempts per URL
-                    try:
-                        log.info(f"🌐 [{label}] Attempt {attempt}: {url}")
-                        page.goto(url, wait_until="commit", timeout=60000)
-                        # Chờ DOM cơ bản render (không cần full load)
-                        page.wait_for_selector("body", timeout=15000)
-                        page_loaded = True
-                        log.info(f"✅ Page loaded ({label})")
-                        break
-                    except PlaywrightTimeout:
-                        log.warning(f"⏱ Timeout [{label}] attempt {attempt}")
-                        if attempt < 2:
-                            time.sleep(3)
-                if page_loaded:
-                    break
-
-            if not page_loaded:
-                raise RuntimeError("Không thể mở trang CBTT sau tất cả attempts")
-
-            # ── Phase 2: Đợi IformationDisclosure JS module sẵn sàng ───
-            log.info("⏳ Đợi module CBTT (IformationDisclosure) khởi tạo...")
-            cbtt_info = self._wait_for_cbtt_module(page, timeout_ms=15000)
-
-            if not cbtt_info.get("exists"):
-                log.warning("  ⚠ Module CBTT không tìm thấy, thử scrape trực tiếp...")
-                page.wait_for_timeout(5000)
+            # ── Phase 1+2: Load trang CBTT + đợi module ────────────────
+            cbtt_info = self._load_cbtt_page(page)
 
             # ── Phase 3: Chụp screenshot để debug ───────────────────────
             try:
@@ -939,30 +997,113 @@ class CafeFScraper:
             if len(ticker_list) > 1 and cbtt_info.get("exists"):
                 # ── Multi-ticker: lần lượt search từng mã ───────────────
                 log.info(f"\n🔄 Multi-ticker mode: {len(ticker_list)} mã CK")
+                tickers_since_restart = 0
+
                 for t_idx, ticker in enumerate(ticker_list, start=1):
                     self.current_ticker = ticker
                     self.ticker_index = t_idx
-                    log.info(f"\n{'='*60}")
-                    log.info(f"🏷 [{t_idx}/{len(ticker_list)}] Đang xử lý: {ticker}")
 
-                    # Search ticker trên CafeF
-                    t_cbtt = self._search_ticker_on_cafef(page, ticker)
-                    if not t_cbtt.get("exists") or t_cbtt.get("totalPage", 0) == 0:
-                        log.info(f"  ⏭ Bỏ qua {ticker}: không có dữ liệu CBTT")
-                        continue
+                    # ── Periodic browser restart để giải phóng memory ───
+                    if tickers_since_restart >= BROWSER_RESTART_INTERVAL:
+                        log.info(f"\n🔄 Restart browser sau {tickers_since_restart} tickers (giải phóng memory)...")
+                        try:
+                            browser, context, page = self._create_browser(pw)
+                            cbtt_info = self._load_cbtt_page(page)
+                            self.browser_restarts += 1
+                            tickers_since_restart = 0
+                            log.info(f"✅ Browser restarted thành công (lần {self.browser_restarts})")
+                        except Exception as e:
+                            log.error(f"💥 Không thể restart browser: {e}")
+                            break  # Không thể tiếp tục nếu browser mới cũng lỗi
 
-                    t_total = t_cbtt["totalPage"]
-                    if MAX_PAGES <= 0:
-                        t_max = t_total
-                    else:
-                        t_max = min(MAX_PAGES, t_total)
+                    # ── Xử lý từng ticker với error isolation ───────────
+                    try:
+                        log.info(f"\n{'='*60}")
+                        log.info(f"🏷 [{t_idx}/{len(ticker_list)}] Đang xử lý: {ticker}")
 
-                    self._scrape_pages(page, context, t_max)
+                        # Search ticker trên CafeF
+                        t_cbtt = self._search_ticker_on_cafef(page, ticker)
+                        if not t_cbtt.get("exists") or t_cbtt.get("totalPage", 0) == 0:
+                            log.info(f"  ⏭ Bỏ qua {ticker}: không có dữ liệu CBTT")
+                            tickers_since_restart += 1
+                            continue
 
-                    # Reset search cho ticker tiếp theo
-                    if t_idx < len(ticker_list):
-                        self._reset_cafef_search(page)
-                        time.sleep(PAGE_DELAY)
+                        t_total = t_cbtt["totalPage"]
+                        if MAX_PAGES <= 0:
+                            t_max = t_total
+                        else:
+                            t_max = min(MAX_PAGES, t_total)
+
+                        self._scrape_pages(page, context, t_max)
+                        tickers_since_restart += 1
+
+                        # Reset search cho ticker tiếp theo
+                        if t_idx < len(ticker_list):
+                            self._reset_cafef_search(page)
+                            time.sleep(PAGE_DELAY)
+
+                    except Exception as e:
+                        tickers_since_restart += 1
+                        is_crash = self._is_page_crashed(e)
+                        if is_crash:
+                            log.error(f"💥 Page crashed khi xử lý {ticker}: {e}")
+                            self.crashed_tickers.append(ticker)
+                            self.error_details.append({
+                                "ticker": ticker, "file": "",
+                                "error": f"Page crashed — sẽ restart browser và retry",
+                            })
+
+                            # Restart browser + retry ticker 1 lần
+                            log.info(f"🔄 Restarting browser sau crash...")
+                            try:
+                                browser, context, page = self._create_browser(pw)
+                                cbtt_info = self._load_cbtt_page(page)
+                                self.browser_restarts += 1
+                                tickers_since_restart = 0
+                                log.info(f"✅ Browser restarted (lần {self.browser_restarts}). Retry {ticker}...")
+
+                                # Retry ticker
+                                try:
+                                    t_cbtt = self._search_ticker_on_cafef(page, ticker)
+                                    if t_cbtt.get("exists") and t_cbtt.get("totalPage", 0) > 0:
+                                        t_total = t_cbtt["totalPage"]
+                                        t_max = min(MAX_PAGES, t_total) if MAX_PAGES > 0 else t_total
+                                        self._scrape_pages(page, context, t_max)
+                                        self.crashed_tickers.remove(ticker)
+                                        log.info(f"✅ Retry {ticker} thành công")
+                                    if t_idx < len(ticker_list):
+                                        self._reset_cafef_search(page)
+                                        time.sleep(PAGE_DELAY)
+                                except Exception as retry_err:
+                                    log.error(f"💥 Retry {ticker} thất bại: {retry_err}")
+                                    self.skipped_tickers.append(ticker)
+
+                            except Exception as restart_err:
+                                log.error(f"💥 Browser restart thất bại: {restart_err}")
+                                self.skipped_tickers.append(ticker)
+                                # Thử restart lần nữa cho các tickers tiếp theo
+                                try:
+                                    browser, context, page = self._create_browser(pw)
+                                    cbtt_info = self._load_cbtt_page(page)
+                                    self.browser_restarts += 1
+                                    tickers_since_restart = 0
+                                except Exception:
+                                    log.error(f"💥 Không thể khôi phục browser. Dừng.")
+                                    break
+                        else:
+                            # Lỗi khác (không phải crash) → skip ticker, tiếp tục
+                            log.error(f"⚠ Lỗi khi xử lý {ticker}: {e}")
+                            self.skipped_tickers.append(ticker)
+                            self.error_details.append({
+                                "ticker": ticker, "file": "",
+                                "error": str(e)[:200],
+                            })
+                            # Ticker lỗi có thể làm DOM hỏng → reset
+                            try:
+                                self._reset_cafef_search(page)
+                            except Exception:
+                                pass
+                            time.sleep(PAGE_DELAY)
 
             elif len(ticker_list) == 1 and cbtt_info.get("exists"):
                 # ── Single-ticker: search 1 mã ──────────────────────────
@@ -997,7 +1138,10 @@ class CafeFScraper:
 
             # ── Kết thúc ────────────────────────────────────────────────
             self.current_ticker = ""
-            browser.close()
+            try:
+                browser.close()
+            except Exception:
+                pass
 
         # ── Tổng kết ────────────────────────────────────────────────────
         log.info(f"\n{'='*60}")
@@ -1008,6 +1152,11 @@ class CafeFScraper:
         log.info(f"   Thất bại             : {self.failed}")
         if self.total_tickers > 1:
             log.info(f"   Tickers đã xử lý     : {self.total_tickers}")
+            log.info(f"   Tickers bị crash      : {len(self.crashed_tickers)}")
+            log.info(f"   Tickers bị skip       : {len(self.skipped_tickers)}")
+            log.info(f"   Browser restarts      : {self.browser_restarts}")
+            if self.skipped_tickers:
+                log.info(f"   Skipped list          : {', '.join(self.skipped_tickers[:20])}")
         log.info(f"   Tổng trong DB history : {self.history.count}")
         log.info(f"   Thư mục PDF          : {PDF_DIR.absolute()}")
         log.info(f"{'='*60}")
@@ -1031,6 +1180,9 @@ class CafeFScraper:
             "skipped": self.skipped,
             "failed": self.failed,
             "total_tickers": self.total_tickers,
+            "crashed_tickers": self.crashed_tickers,
+            "skipped_tickers": self.skipped_tickers,
+            "browser_restarts": self.browser_restarts,
             "db_stats": stats,
         }
         report_path = PDF_DIR / "_scraper_report.json"

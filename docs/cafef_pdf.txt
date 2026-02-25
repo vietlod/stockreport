@@ -1,9 +1,14 @@
-Navigate to https://m.cafef.vn/du-lieu/cong-bo-thong-tin.chn and analyze the page structure. I need you to:
+Chỉ thực hiện Phân tích cấu trúc hoạt động của sites và nghiên cứu sâu cách tổng hợp các file báo cáo dạng PDF từ nguồn Thống kê hải quan ở URL bên dưới. Sau đó, các trao đổi  để lên kế hoạch tích hợp vào ứng dụng hiện tại.
+
+```
+
+Navigate to https://www.customs.gov.vn/index.jsp?pageId=4901&group=undefined&category=S%E1%BB%91%20li%E1%BB%87u%20%C4%91%E1%BB%8Bnh%20k%E1%BB%B3 and analyze the page structure. I need you to:
 
 1. First, load the page and wait for it to fully render.
 2. Examine the main content area - look for a table or list of "Công bố thông tin" (information disclosure) entries.
 3. For each entry/row, identify:
-   - What information is displayed (company name, date, title, etc.)
+   - Các trường chọn để tải báo cáo ở "Lịch công bố thông tin" như Tên báo cáo, Trạng thái thông tin, Tháng, Thời gian công bố,... và nút "Tra cứu"
+   - What information is displayed (thông tin các cột: Nội dung, Tháng,	Sơ bộ,	Điều chỉnh, Chính thức)
    - Whether there are links to detail pages or direct PDF download links
    - The URL pattern of those links
 4. Check if there's pagination (next page, page numbers, etc.) and how it works.
@@ -19,3 +24,154 @@ Return a detailed report with:
 - How pagination works (URL params, AJAX, etc.)
 - Any API endpoints discovered
 - Example URLs for at least 2-3 entries and their corresponding PDF links
+
+```
+
+Đối với các file PDF cũ hơn (trước năm 2022) thì có thể Tham khảo file @docs/haiquan/haiquan.xlsx với danh sách các URL được tổng hợp từ ngày 01/01/2009 đến ngày 20/09/2022 (cột LinkSB và LinkCT)
+
+
+Xây dựng kế hoạch hoàn chỉnh (lưu thành file ở @docs/haiquan_plan.md) mô tả chi tiết từng vấn đề, đề xuất cách khắc phục cụ thể và hiệu quả dựa trên thực trạng của url Hải quan và kết quả các nghiên cứu sâu.
+
+Tiếp đến tạo file @docs/haiquan_tasks.md gồm các phase -> session -> Task cụ thể -> Checkpoint với các tiêu chí đánh giá, checklist rõ ràng để có thể check khi hoàn thành để triển khai.
+
+
+
+
+Xem toàn bộ tính năng ở "CafeF CBTT - Report Manager" như là một tab trong một ứng dụng Report Manager. Thực hiện cô lập (isolate) toàn bộ tính năng "CafeF CBTT" như là một flow "CafeF CBTT" tách biệt. Sau đó nhân bản (clone) "CafeF CBTT" sang một flow mới độc lập với tab mới ngay bên cạnh (dạng Header Menu), đặt tên là "Hải Quan" với các thay đổi phù hợp với kết quả nghiên cứu trước đó ở @docs/haiquan_plan.md với hai mục tiêu chính:
+
+- Thực hiện tải tất cả các báo cáo hải quan (file PDF) về local (VPS) và đồng bộ lên Drive tương tự các tính năng ở "CafeF CBTT"
+- Hoạt động độc lập với "CafeF CBTT" và không ảnh hưởng hoạt động và độ ổn định của hai tính năng
+
+Double-check để đảm bảo chắc chắn việc triển khai tab "Hải Quan" là hoàn toàn tách biệt và tuyệt đối không làm ảnh hưởng đến flow hoạt động của "CafeF CBTT"
+
+
+
+Sau khi nắm vững cấu trúc hệ thống và cách tổng hợp danh sách các URL chứa file PDF để tải về thì hãy nghiên cứu sâu để lên kế hoạch thực hiện theo các yêu cầu được mô tả bên dưới:
+
+
+```
+
+Phân tích tên file PDF từ URL để ghi nhận các thông tin [LOẠI BÁO CÁO]_[MÃ BÁO CÁO]_[KỲ BÁO CÁO] để lưu file theo Quy tắc đặt tên: [LOẠI BÁO CÁO]_[KỲ BÁO CÁO]_[MÃ BÁO CÁO]
+
+Trong đó:
+
+- LOẠI BÁO CÁO: Sơ bộ -> SB; Điều chỉnh -> DC; final hoặc Chính thức -> CT
+- NĂM THÁNG BÁO CÁO: là tháng và năm báo cáo
+- MÃ BÁO CÁO: mã báo cáo
+
+Ví dụ: file PDF ở đường dẫn https://files.customs.gov.vn/CustomsCMS/TONG_CUC/2022/9/7/2022-T08T-5N(VN-SB).pdf
+
+sẽ có:
+
+- LOẠI BÁO CÁO: VN-SB -> Sơ bộ -> SB
+- KỲ BÁO CÁO: 2022T8
+- MÃ BÁO CÁO: 5N
+
+Vì vậy, tên file tải về sẽ đặt là: SB_2022T8_5N.pdf
+
+**LƯU Ý CÁC KÍ TỰ ĐẶC BIỆT XÁC ĐỊNH KỲ BÁO CÁO TRONG TÊN FILE PDF Ở URL:**
+
+- K1 -> Kỳ 1 trong tháng (từ ngày 1 đến ngày 15 của tháng)
+https://files.customs.gov.vn/CustomsCMS/TONG_CUC/2022/4/29/2021-T07K1-1N(VN-CT).pdf -> CT_2021T7K1_K1.pdf
+
+- K2 -> Kỳ 2 trong tháng (từ ngày 16 đến hết tháng)
+https://files.customs.gov.vn/CustomsCMS/TONG_CUC/2022/4/29/6542021-T08K2-1N(VN-CT).pdf ->CT_2021T8K2_1N.pdf
+
+- T#T -> Tháng # (trọn tháng: đầu tháng đến cuối tháng)
+https://files.customs.gov.vn/CustomsCMS/TONG_CUC/2022/4/29/2021-T07T-2X(VN-CT).pdf -> CT_2021T7_2X.pdf
+ 
+- Q -> Quý
+https://files.customs.gov.vn/CustomsCMS/TONG_CUC/2022/6/10/PTVT-NKQ2-final.pdf -> CT_2021Q2_PTVT.pdf
+
+**TRƯỜNG HỢP NGOẠI LỆ:**
+- Lỗi nếu Year không xác định chính xác từ tên file trong URL thì Year = năm trong URL (sau /TONG_CUC) trừ đi 1. Ví dụ:
+https://files.customs.gov.vn/CustomsCMS/TONG_CUC/2022/4/29/2452021-T08K2-1X(VN-CT).pdf ->CT_2021T8K2_1X.pdf
+https://files.customs.gov.vn/CustomsCMS/TONG_CUC/2022/6/10/PTVT-NKQ2-final.pdf -> CT_2021Q2_PTVT.pdf
+
+
+```
+
+
+
+
+
+
+N -> NK
+X -> XK
+
+
+K1 -> Kỳ 1 trong tháng (từ ngày 1 đến ngày 15 của tháng)
+K2 -> Kỳ 2 trong tháng (từ ngày 16 đến hết tháng)
+
+T#T -> Tháng # (trọn tháng: đầu tháng đến cuối tháng)
+
+Q -> Quý
+
+
+1X -> Biểu số 12B
+2X -> Biểu số 14B
+3X -> Biểu số 16B
+5X -> Biểu số 19B
+
+4 -> Biểu số 18B -> (TRỊ GIÁ XUẤT, NHẬP KHẨU CHIA THEO TỈNH/THÀNH PHỐ)
+PTVT -> Biểu số 1N-PTVT -> (NHẬP KHẨU HÀNG HÓA THEO PHƯƠNG THỨC VẬN TẢI)
+
+1N -> Biểu số 13B
+3N -> Biểu số 15B
+3N -> Biểu số 17B
+5N -> Biểu số 20B
+
+
+https://files.customs.gov.vn/CustomsCMS/TONG_CUC/2022/4/29/5002021-T12K1-1N(VN-CT).pdf
+
+https://files.customs.gov.vn/CustomsCMS/TONG_CUC/2022/4/29/2021-T11K2-1X(VN-CT).pdf
+
+https://files.customs.gov.vn/CustomsCMS/TONG_CUC/2022/6/10/PTVT-NKQ3-final.pdf
+
+Lỗi nếu Year không xác định chính xác từ tên file trong URL thì Year = năm trong URL (sau /TONG_CUC) trừ đi 1. Ví dụ:
+- Year: https://files.customs.gov.vn/CustomsCMS/TONG_CUC/2022/4/29/2452021-T08K2-1X(VN-CT).pdf -> Year: 2021
+- https://files.customs.gov.vn/CustomsCMS/TONG_CUC/2022/6/10/PTVT-NKQ2-final.pdf -> 2021, PTVT, NK, Q2
+
+
+
+
+
+
+
+
+Sử dụng thông tin VPS Connection Standards bên dưới để deploy + test trên VPS
+
+- Tạo thư mục dự án: /opt/stockreport
+- Pull lastest code từ nhánh dev remote về VPS để triển khai
+- Tham khảo @docs/vps.md để thiết lập port phù hợp cho ứng dụng Stock Report tránh conflict ports và ảnh hưởng đến các app khác đang hoạt động trên VPS
+- Thiết lập SSL Cerification cho stockreport.khoviet.com
+- Thiết lập Ngnix phù hợp để chạy ứng dụng
+
+```
+**Project directory:** /opt/stockreport
+
+**URL Frontend:** stockreport.khoviet.com
+
+
+**Tools Required:**
+- PuTTY plink.exe (SSH automation)
+- PuTTY pscp.exe (File transfer)
+
+**Connection Parameters:**
+```powershell
+$VPS_IP = "212.85.24.158"
+$VPS_USER = "root"
+$VPS_PASSWORD = "EcoData2025VPS@Secure-Pass123"
+$PLINK_PATH = "C:\Program Files\PuTTY\plink.exe"
+$PSCP_PATH = "C:\Program Files\PuTTY\pscp.exe"
+$HOSTKEY = "SHA256:WCIu/MntsW6iVVem37UoYsMM8APL+/MQYe6vtbTmt2g"
+```
+
+**Standard Connection Command:**
+```powershell
+"/c/Program Files/PuTTY/plink.exe" `
+  -hostkey "SHA256:WCIu/MntsW6iVVem37UoYsMM8APL+/MQYe6vtbTmt2g" `
+  -pw "EcoData2025VPS@Secure-Pass123" `
+  root@212.85.24.158 `
+  "COMMAND_HERE"
+```

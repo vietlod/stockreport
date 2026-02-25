@@ -225,6 +225,10 @@ class ScrapeJob:
                 self.progress["filtered_time"] = scraper.filtered_time
                 self.progress["drive_synced"] = drive_sync_count[0]
                 self.progress["error_details"] = scraper.error_details[-5:]  # Last 5
+                # Crash recovery tracking
+                self.progress["crashed_tickers"] = len(scraper.crashed_tickers)
+                self.progress["skipped_tickers"] = len(scraper.skipped_tickers)
+                self.progress["browser_restarts"] = scraper.browser_restarts
                 # Time range context cho frontend
                 if scraper_module.TIME_FROM_YEAR or scraper_module.TIME_TO_YEAR:
                     fr = f"{scraper_module.TIME_FROM_YEAR or ''}{'Q'+scraper_module.TIME_FROM_QUARTER if scraper_module.TIME_FROM_QUARTER else ''}"
@@ -259,6 +263,9 @@ class ScrapeJob:
             self.progress["filtered_time"] = scraper.filtered_time
             self.progress["drive_synced"] = drive_sync_count[0]
             self.progress["error_details"] = scraper.error_details[-5:]
+            self.progress["crashed_tickers"] = len(scraper.crashed_tickers)
+            self.progress["skipped_tickers"] = len(scraper.skipped_tickers)
+            self.progress["browser_restarts"] = scraper.browser_restarts
             self.progress["stats_summary"] = get_stats_summary_sync()
             self.progress["status"] = "completed"
             self.progress["completed_at"] = datetime.now().isoformat()
@@ -270,6 +277,9 @@ class ScrapeJob:
             self.progress["filtered_stock"] = scraper.filtered_stock
             self.progress["filtered_time"] = scraper.filtered_time
             self.progress["drive_synced"] = drive_sync_count[0]
+            self.progress["crashed_tickers"] = len(scraper.crashed_tickers)
+            self.progress["skipped_tickers"] = len(scraper.skipped_tickers)
+            self.progress["browser_restarts"] = scraper.browser_restarts
             self.progress["stats_summary"] = get_stats_summary_sync()
             self.progress["status"] = "stopped"
         except Exception as e:
@@ -279,6 +289,9 @@ class ScrapeJob:
             self.progress["filtered_stock"] = scraper.filtered_stock if scraper else 0
             self.progress["filtered_time"] = scraper.filtered_time if scraper else 0
             self.progress["drive_synced"] = drive_sync_count[0]
+            self.progress["crashed_tickers"] = len(scraper.crashed_tickers) if scraper else 0
+            self.progress["skipped_tickers"] = len(scraper.skipped_tickers) if scraper else 0
+            self.progress["browser_restarts"] = scraper.browser_restarts if scraper else 0
             self.progress["stats_summary"] = get_stats_summary_sync()
             self.progress["status"] = "error"
             self.progress["error"] = str(e)

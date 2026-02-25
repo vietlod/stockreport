@@ -2,6 +2,35 @@
 
 Tất cả thay đổi đáng chú ý của dự án được ghi nhận tại đây.
 
+## [1.1.4] - 2026-02-25
+
+### 🐛 Bugfixes
+
+#### Page Crash Recovery (`cafef_scraper.py`)
+- **Fix "Page crashed"**: Chromium headless tích lũy memory qua hàng trăm tickers → crash `Page.wait_for_selector: Page crashed`
+  - **Periodic browser restart**: tự động restart browser mỗi `BROWSER_RESTART_INTERVAL` tickers (mặc định 50) để giải phóng memory
+  - **Crash detection**: `_is_page_crashed()` detect "page crashed", "target closed", "context or browser has been closed"
+  - **Auto-recovery**: khi detect crash → restart browser → retry ticker bị crash 1 lần
+- **Fix multi-ticker dừng sớm**: vòng lặp multi-ticker không có try/catch per-ticker → 1 crash dừng toàn bộ
+  - **Per-ticker error isolation**: mỗi ticker bọc trong `try/except` riêng — 1 lỗi chỉ skip ticker đó, không ảnh hưởng phần còn lại
+  - **Error tracking**: `crashed_tickers[]`, `skipped_tickers[]`, `browser_restarts` counter
+
+### 🔧 Cải tiến
+
+#### Chromium Stability (`cafef_scraper.py`)
+- **Launch flags**: `--disable-dev-shm-usage`, `--disable-gpu`, `--no-sandbox`, `--disable-extensions`, `--disable-background-timer-throttling`, `--disable-renderer-backgrounding`
+- **Refactor**: tách `_create_browser()`, `_load_cbtt_page()` từ `run()` — cho phép restart browser bất kỳ lúc nào
+
+#### Scrape Progress (`server.py`)
+- **Thêm fields** vào WebSocket progress: `crashed_tickers`, `skipped_tickers`, `browser_restarts`
+- Tracking áp dụng cho tất cả trạng thái: `completed`, `stopped`, `error`
+
+#### Report JSON (`cafef_scraper.py`)
+- **Enhanced report**: `_scraper_report.json` bổ sung `crashed_tickers`, `skipped_tickers`, `browser_restarts`
+- **Tổng kết log**: hiển thị chi tiết crash/skip/restart counts khi kết thúc
+
+---
+
 ## [1.1.3] - 2026-02-25
 
 ### 🚀 Tính năng mới
