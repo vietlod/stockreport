@@ -247,6 +247,18 @@ async function hq_stopScrape() {
 
 // ── HQ Drive Sync ──────────────────────────────────────────────────────────
 async function hq_syncDrive() {
+    // Check OAuth status first (same as CafeF syncDrive)
+    const status = await api('/api/oauth2/status');
+    if (status && !status.connected) {
+        toast('Chưa kết nối Google Drive. Đang chuyển đến trang cấp quyền...', 'info');
+        if (typeof startOAuthFlow === 'function') {
+            startOAuthFlow('drive');
+        } else {
+            toast('⚠ Chưa cấu hình Google OAuth. Vui lòng kiểm tra cài đặt.', 'error');
+        }
+        return;
+    }
+
     hqBgTask.drive = true;
     hq_updateActionButtons();
     toast('☁ Đang khởi tạo sync Drive Hải quan...', 'info');
@@ -261,6 +273,14 @@ async function hq_syncDrive() {
     if (resp.status === 'started') {
         document.getElementById('hqSyncCard').style.display = '';
         toast('☁ Sync Drive Hải quan đang chạy nền', 'info');
+    } else if ((resp.error || '').includes('Chưa có Google OAuth token')) {
+        hqBgTask.drive = false;
+        hq_updateActionButtons();
+        if (typeof startOAuthFlow === 'function') {
+            startOAuthFlow('drive');
+        } else {
+            toast(resp.error, 'error');
+        }
     } else {
         hqBgTask.drive = false;
         hq_updateActionButtons();
@@ -295,32 +315,80 @@ function hq_handleProgress(data) {
     card.style.display = '';
 
     const status = data.status || '';
+    const phase = data.phase || '';
     const current = data.current || 0;
     const total = data.total || 0;
+    const filename = data.filename || data.current_file || '';
     const pct = total > 0 ? Math.round((current / total) * 100) : 0;
 
     document.getElementById('hqProgressBar').style.width = pct + '%';
-    document.getElementById('hqProgressFile').textContent = data.filename || status;
+
+    // Phase-aware Vietnamese status text
+    const ds = data.data_source || '';
+    const dsLabel = {
+        'web_crawl': '🌐 Web Crawl',
+        'xlsx': '📁 File XLSX',
+        'xlsx_fallback': '📁 XLSX (Fallback)',
+        'xlsx+web_crawl': '📁 XLSX + 🌐 Web Crawl',
+    }[ds] || '';
+    const dsBadge = dsLabel ? ` [${dsLabel}]` : '';
+
+    const phaseMap = {
+        'starting': '🚀 Đang khởi tạo...',
+        'loading_xlsx': '📖 Đang đọc file Excel...',
+        'crawling_web': '🌐 Đang crawl customs.gov.vn...',
+        'filtering': `🔍 Đang lọc dữ liệu... (${total} URLs)${dsBadge}`,
+        'downloading': `📥 ${filename}${dsBadge}`,
+        'done': '✅ Hoàn tất!',
+        'error': `❌ Lỗi: ${data.error || 'Không xác định'}`,
+    };
+    document.getElementById('hqProgressFile').textContent =
+        phaseMap[phase] || (filename ? `📥 ${filename}` : status);
 
     const stats = [];
     if (data.downloaded) stats.push(`✅ ${data.downloaded}`);
     if (data.skipped) stats.push(`⏭ ${data.skipped}`);
     if (data.failed) stats.push(`❌ ${data.failed}`);
+    if (data.drive_synced) stats.push(`☁ ${data.drive_synced}`);
     document.getElementById('hqProgressStats').textContent = stats.join(' · ');
-    document.getElementById('hqProgressCounts').textContent = `${current} / ${total}`;
+    document.getElementById('hqProgressCounts').textContent =
+        total > 0 ? `${current} / ${total}` : '';
 
-    if (status === 'done' || status === 'stopped' || status === 'error') {
+    // Error details display
+    const notes = document.getElementById('hqProgressNotes');
+    if (notes) {
+        let html = '';
+        // Last error (inline, always visible)
+        if (data.last_error) {
+            html += `<div class="note-item" style="color:var(--red,#ef4444)">⚠ ${filename || 'file'}: ${data.last_error}</div>`;
+        }
+        // Error details list (last 5)
+        const errDetails = data.error_details || [];
+        if (errDetails.length > 0) {
+            errDetails.forEach(e => {
+                html += `<div class="note-item">✖ ${e.filename}: ${e.error}</div>`;
+            });
+        }
+        notes.innerHTML = html;
+    }
+
+    // Terminal statuses (match both 'done' and 'completed' for backward compat)
+    if (status === 'done' || status === 'completed' ||
+        status === 'stopped' || status === 'error') {
         hqBgTask.scrape = false;
         hq_updateActionButtons();
 
-        if (status === 'done') {
-            toast('✅ Tải Hải quan hoàn tất!', 'success');
+        if (status === 'done' || status === 'completed') {
+            const dl = data.downloaded || 0;
+            const sk = data.skipped || 0;
+            const fl = data.failed || 0;
+            toast(`✅ Tải Hải quan hoàn tất! Tải: ${dl}, Bỏ qua: ${sk}, Lỗi: ${fl}`, 'success');
             hq_loadStats();
             hq_loadHistory();
         } else if (status === 'stopped') {
             toast('⏹ Đã dừng tải Hải quan', 'info');
         } else {
-            toast('❌ Lỗi tải Hải quan: ' + (data.error || ''), 'error');
+            toast('❌ Lỗi tải Hải quan: ' + (data.error || 'Không xác định'), 'error');
         }
     }
 }

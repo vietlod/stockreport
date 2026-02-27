@@ -297,6 +297,14 @@ Ví dụ:
 - `SB_2022T8_5N.pdf` → Sơ bộ, tháng 8/2022, mã 5N
 - `CT_2021T7K1_1N.pdf` → Chính thức, kỳ 1 tháng 7/2021, mã 1N
 - `CT_2021Q2_PTVT.pdf` → Chính thức, quý 2/2021, mã PTVT
+- `CT_2022Q1_PTVT-XK.pdf` → Chính thức, quý 1/2022, xuất khẩu PTVT
+- `CT_2021Q4_HTX.pdf` → Từ `Bieu HTX_QIV_2021.pdf` (Roman numeral QIV→Q4)
+
+**Parsing đặc biệt:**
+- Prefix không có CT/SB/DC → mặc định `CT` (vd: `EN-PR` → `CT`)
+- Roman numerals: `QIV→Q4`, `QIII→Q3`, `QII→Q2`, `QI→Q1`
+- NK/XK direction: `-XK` suffix cho xuất khẩu (vd: `PTVT-XKQ1` → `PTVT-XK`)
+- Year fallback: filename thiếu năm → dùng năm từ URL path + 1
 
 ### HQ Database
 
@@ -321,6 +329,10 @@ SQLite tại `pdf/haiquan/_haiquan_history.db`:
 
 ### HQ Drive Sync
 
+- **Real-time auto sync**: mỗi file tải xong → tự động upload lên Drive (giống CafeF)
+  - `upload_single(pdf_path)` gọi ngay trong `on_download` callback
+  - Đánh dấu `drive_synced=1` + `drive_file_id` vào SQLite
+  - Frontend hiển thị `☁ N` (số file đã sync) cùng progress stats
 - Upload flat structure lên folder riêng (`HQ_GOOGLE_DRIVE_FOLDER_ID`)
 - Reuse OAuth credentials (chung token với CafeF)
 - Incremental: batch-list files trên Drive, skip nếu đã tồn tại + cùng size

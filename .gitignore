@@ -2,6 +2,7 @@
 .env
 .env.*
 google_oauth_credentials.json
+client_secret*.json
 service_account.json
 docs/service_account.json
 _google_token.json

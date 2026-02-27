@@ -79,7 +79,11 @@ async function api(url, opts = {}, requireAuth = false) {
         });
         const data = await resp.json().catch(() => ({}));
         if (resp.status === 401 && requireAuth) {
-            showLogin();
+            // Inline — do NOT call showLogin() to avoid cache issues
+            state.adminToken = null;
+            localStorage.removeItem('stockreport_admin');
+            document.getElementById('appContainer').style.display = 'none';
+            document.getElementById('loginScreen').classList.add('visible');
             return null;
         }
         return data;
@@ -740,6 +744,13 @@ document.addEventListener('click', (e) => {
 });
 
 // ── Auth ───────────────────────────────────────────────────────────────────
+function showLogin() {
+    state.adminToken = null;
+    localStorage.removeItem('stockreport_admin');
+    document.getElementById('appContainer').style.display = 'none';
+    document.getElementById('loginScreen').classList.add('visible');
+}
+
 async function showApp() {
     document.getElementById('loginScreen').classList.remove('visible');
     document.getElementById('appContainer').style.display = '';

@@ -2,6 +2,43 @@
 
 Tất cả thay đổi đáng chú ý của dự án được ghi nhận tại đây.
 
+## [1.2.2] - 2026-02-27
+
+### 🚀 Tính năng mới
+
+#### HQ Auto Drive Sync (`server.py`, `haiquan_sync.py`)
+- **Real-time sync**: mỗi file HQ tải xong → tự động upload lên Google Drive (giống CafeF)
+  - Khởi tạo `HaiQuanDriveSync` nếu `HQ_GOOGLE_DRIVE_FOLDER_ID` có trong `.env`
+  - `on_download` callback gọi `upload_single()` ngay sau khi tải
+  - Đánh dấu `drive_synced=1` + lưu `drive_file_id` vào SQLite
+- **`upload_single(pdf_path)`** [NEW]: upload đơn lẻ lên Drive, trả file ID
+- **`_find_file_id()`** [NEW]: check file đã tồn tại trên Drive (skip duplicate)
+- **Frontend**: hiển thị `☁ N` (số file đã sync) cạnh `✅ downloaded` / `❌ failed`
+
+### 🐛 Bugfixes
+
+#### SSL Certificate Error (`haiquan_scraper.py`)
+- **Nguyên nhân**: SSL cert trên `files.customs.gov.vn` hết hạn → `SSLError` mọi download
+- **Fix**: `verify=False` cho requests đến domain này + `urllib3.disable_warnings()`
+
+### 🔧 Cải tiến
+
+#### Filename Parsing (`haiquan_scraper.py`)
+- **3 regex patterns** mới: `RE_STANDARD`, `RE_QUARTER`, `RE_QUARTER_ROMAN`
+- **Default status**: prefix không có CT/SB/DC → mặc định `CT` (vd: `EN-PR` → `CT`)
+- **Roman numerals**: `QIV→Q4`, `QIII→Q3`, `QII→Q2`, `QI→Q1`
+- **NK/XK direction**: `PTVT-XKQ1-2022.pdf` → `CT_2022Q1_PTVT-XK.pdf`
+- **Year suffix**: `PTVT-NKQ1-2022.pdf` → `CT_2022Q1_PTVT.pdf`
+- **Year fallback**: filename thiếu năm → dùng năm từ URL + 1
+
+#### Error Reporting (`haiquan_scraper.py`, `server.py`, `haiquan_app.js`)
+- `download_pdf()` trả tuple `(result, error_msg)` với chi tiết lỗi cụ thể
+- Skip retry cho HTTP 404/403/410 (URL không hợp lệ)
+- `error_details[]` + `last_error` broadcast qua WebSocket
+- Frontend: `#hqProgressNotes` hiển thị lỗi gần nhất (tối đa 5 chi tiết)
+
+---
+
 ## [1.2.1] - 2026-02-25
 
 ### 🚀 Tính năng mới

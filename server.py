@@ -535,10 +535,50 @@ class HaiQuanScrapeJob:
             )
 
     def _run_scrape(self, config: dict):
+        scraper = None
+        drive_sync_count = [0]
         try:
+            # Broadcast ngay khi thread bắt đầu (trước import/load)
+            self._broadcast({"type": "haiquan_progress", **self.progress})
+
             from haiquan_scraper import HaiQuanScraper
 
+            # Phase: loading_xlsx
+            self.progress["phase"] = "loading_xlsx"
+            self._broadcast({"type": "haiquan_progress", **self.progress})
+
             scraper = HaiQuanScraper(pdf_dir=HQ_PDF_DIR)
+
+            # Drive sync real-time: upload mỗi file ngay sau khi tải
+            drive_sync = None
+            if os.getenv("HQ_GOOGLE_DRIVE_FOLDER_ID"):
+                try:
+                    from haiquan_sync import HaiQuanDriveSync
+                    drive_sync = HaiQuanDriveSync()
+                    log.info("☁ HQ Drive sync real-time: enabled")
+                except Exception as e:
+                    log.warning(f"☁ HQ Drive sync disabled: {e}")
+
+            def on_download(dest_path):
+                """Called after each successful download — sync to Drive."""
+                dest = Path(dest_path)
+                if drive_sync and dest.exists():
+                    file_id = drive_sync.upload_single(dest)
+                    if file_id:
+                        drive_sync_count[0] += 1
+                        # Mark file as synced in HQ DB
+                        try:
+                            db_conn = get_hq_db()
+                            if db_conn:
+                                db_conn.execute(
+                                    "UPDATE haiquan_downloads SET drive_synced = 1, "
+                                    "drive_file_id = ? WHERE filename = ?",
+                                    (file_id, dest.name)
+                                )
+                                db_conn.commit()
+                                db_conn.close()
+                        except Exception:
+                            pass
 
             def on_progress(current, total, filename, phase):
                 if self.should_stop:
@@ -546,22 +586,32 @@ class HaiQuanScrapeJob:
                 self.progress.update({
                     "current": current,
                     "total": total,
-                    "current_file": filename,
+                    "filename": filename,       # cho frontend
+                    "current_file": filename,   # backward compat
                     "phase": phase,
                     "downloaded": scraper.downloaded,
                     "skipped": scraper.skipped,
                     "failed": scraper.failed,
+                    "last_error": scraper.last_error,
+                    "error_details": scraper.error_details[-5:],
+                    "drive_synced": drive_sync_count[0],
+                    "data_source": getattr(scraper, "data_source", ""),
                 })
                 self._broadcast({
                     "type": "haiquan_progress",
                     **self.progress,
                 })
 
-            result = scraper.run(config=config, on_progress=on_progress)
+            result = scraper.run(
+                config=config,
+                on_progress=on_progress,
+                on_download=on_download,
+            )
             self.progress.update({
-                "status": "completed",
+                "status": "done",
                 "phase": "done",
                 **result,
+                "drive_synced": drive_sync_count[0],
                 "completed_at": datetime.now().isoformat(),
             })
             scraper.close()
@@ -569,6 +619,7 @@ class HaiQuanScrapeJob:
         except Exception as e:
             self.progress["status"] = "error"
             self.progress["error"] = str(e)
+            self.progress["phase"] = "error"
             log.error(f"HaiQuan scrape error: {e}", exc_info=True)
         finally:
             self.running = False
