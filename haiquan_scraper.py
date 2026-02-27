@@ -757,8 +757,22 @@ def crawl_web_urls(year_from: int = 2022, year_to: int = None,
         meta = parse_filename(url)
         if meta:
             year = meta.get("year", 0)
-            if year and not (year_from <= year <= year_to):
-                continue
+        else:
+            # Thử extract year từ URL path (vd: /TONG_CUC/2026/2/...)
+            year = 0
+            url_year_match = re.search(r'/(?:TONG_CUC|CustomsCMS)/(?:TONG_CUC/)?(\d{4})/', url)
+            if url_year_match:
+                year = int(url_year_match.group(1))
+
+        # Filter by year range
+        if year and not (year_from <= year <= year_to):
+            continue
+        # Bỏ qua URLs không xác định được năm
+        if not year:
+            unparsed += 1
+            continue
+
+        if meta:
             meta["url"] = url
             meta["source"] = "web_crawl"
             results.append(meta)
@@ -769,7 +783,7 @@ def crawl_web_urls(year_from: int = 2022, year_to: int = None,
                 "url": url,
                 "filename": original_fn,
                 "original_filename": original_fn,
-                "year": 0,
+                "year": year,
                 "month": None,
                 "quarter": None,
                 "period": "",
@@ -883,8 +897,7 @@ class HaiQuanScraper:
         if year_from or year_to:
             all_urls = [
                 u for u in all_urls
-                if (u.get("year", 0) == 0) or  # unparsed: include
-                   (year_from <= u.get("year", 0) <= year_to)
+                if u.get("year", 0) and (year_from <= u.get("year", 0) <= year_to)
             ]
         if report_types:
             types_upper = [t.upper() for t in report_types]
