@@ -24,6 +24,43 @@ async function hq_init() {
     await hq_loadFilters();
     await hq_loadStats();
     await hq_loadHistory();
+    await hq_checkStatus();  // Restore state nếu có task đang chạy nền
+}
+
+// ── HQ Status Check (recover on refresh) ───────────────────────────────────
+let hqPollInterval = null;
+
+async function hq_checkStatus() {
+    const data = await api('/api/haiquan/scrape/status');
+    if (data && data.running) {
+        hqBgTask.scrape = true;
+        hq_updateActionButtons();
+        // Restore progress card
+        if (data.progress && Object.keys(data.progress).length) {
+            hq_handleProgress({ type: 'haiquan_progress', ...data.progress });
+        }
+        hq_startPolling();
+    }
+}
+
+function hq_startPolling() {
+    if (hqPollInterval) return;
+    hqPollInterval = setInterval(async () => {
+        const data = await api('/api/haiquan/scrape/status');
+        if (data && data.progress && Object.keys(data.progress).length) {
+            hq_handleProgress({ type: 'haiquan_progress', ...data.progress });
+        }
+        if (data && !data.running) {
+            hq_stopPolling();
+        }
+    }, 3000);
+}
+
+function hq_stopPolling() {
+    if (hqPollInterval) {
+        clearInterval(hqPollInterval);
+        hqPollInterval = null;
+    }
 }
 
 // ── HQ Stats ───────────────────────────────────────────────────────────────
@@ -231,8 +268,10 @@ async function hq_startScrape() {
 
     if (resp && resp.status === 'started') {
         document.getElementById('hqProgressCard').style.display = '';
+        document.getElementById('hqProgressFile').textContent = '🚀 Đang khởi tạo...';
         hqBgTask.scrape = true;
         hq_updateActionButtons();
+        hq_startPolling();
         toast('🚀 Bắt đầu tải Hải quan...', 'info');
     } else {
         toast(resp?.error || 'Không thể bắt đầu', 'error');
@@ -377,6 +416,7 @@ function hq_handleProgress(data) {
         status === 'stopped' || status === 'error') {
         hqBgTask.scrape = false;
         hq_updateActionButtons();
+        hq_stopPolling();
 
         if (status === 'done' || status === 'completed') {
             const dl = data.downloaded || 0;
