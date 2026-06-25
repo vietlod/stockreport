@@ -1,6 +1,6 @@
 # ECODATA VPS Infrastructure
 
-**Domain:** ecodata.khoviet.com
+**Domain:** ecodata.tnsai.vn
 **VPS IP:** 212.85.24.158
 **OS:** Ubuntu (Docker-based deployment)
 **SSL:** Let's Encrypt (TLSv1.2 + TLSv1.3)
@@ -265,7 +265,7 @@ Nginx (VPS host) :443 SSL
 
 ## 4. Nginx VPS Host Configuration
 
-**File:** `/etc/nginx/sites-available/ecodata.khoviet.com`
+**File:** `/etc/nginx/sites-available/ecodata.tnsai.vn`
 **Source:** [scripts/deployment/nginx_ecodata.conf](scripts/deployment/nginx_ecodata.conf)
 
 ### Routing Table
@@ -425,7 +425,7 @@ docker-compose -f docker-compose.production.yml logs -f backend
 
 ```bash
 # Backend API
-curl https://ecodata.khoviet.com/health
+curl https://ecodata.tnsai.vn/health
 
 # Kiem tra tat ca containers
 docker ps -a | grep econdata
@@ -468,11 +468,12 @@ docker-compose -f docker-compose.production.yml build --no-cache frontend
 
 ---
 
-## 11. Stock Report (stockreport.khoviet.com)
+## 11. Stock Report (stockreport.tnsai.vn)
 
 **Thu muc:** `/opt/stockreport`
 **Port:** 8002 (tranh conflict: 8000=ecodata, 8001=stock-api)
-**URL:** https://stockreport.khoviet.com
+**URL:** https://stockreport.tnsai.vn
+**VPS:** 31.97.110.12 (Ubuntu 24.04 LTS)
 
 ### Cau truc
 
@@ -482,7 +483,7 @@ docker-compose -f docker-compose.production.yml build --no-cache frontend
 | Service | `stockreport.service` |
 | Python | venv tai `.venv` |
 | SSL | Let's Encrypt (certbot) |
-| Nginx | `/etc/nginx/sites-available/stockreport.khoviet.com` |
+| Nginx | `/etc/nginx/sites-available/stockreport.tnsai.vn` |
 
 ### Lenh thuong dung
 
@@ -502,3 +503,4 @@ cd /opt/stockreport && git pull origin dev && systemctl restart stockreport
 ```powershell
 .\docs\deployment\deploy-vps.ps1
 ```
+

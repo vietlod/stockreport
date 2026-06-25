@@ -270,13 +270,13 @@ Thêm tab **"Hải Quan"** hoàn toàn tách biệt với CafeF CBTT, tải và 
 ### 🚀 Tính năng mới
 
 #### OAuth Web Flow (production)
-- **Redirect production**: OAuth flow dùng `https://stockreport.khoviet.com/oauth2callback` thay localhost
+- **Redirect production**: OAuth flow dùng `https://stockreport.tnsai.vn/oauth2callback` thay localhost
 - **Endpoints**:
   - `GET /api/oauth2/start` — trả URL redirect đến Google consent (yêu cầu admin)
   - `GET /oauth2callback` — nhận code từ Google, lưu token, redirect về `/?oauth=success`
   - `GET /api/oauth2/status` — kiểm tra đã có token chưa
   - `GET /api/oauth2/debug` — debug: client_id + redirect_uri (so khớp Google Cloud Console)
-- **Env**: `OAUTH_REDIRECT_URI` (mặc định `https://stockreport.khoviet.com/oauth2callback`)
+- **Env**: `OAUTH_REDIRECT_URI` (mặc định `https://stockreport.tnsai.vn/oauth2callback`)
 - **UI**: Sync Drive/Sheet kiểm tra token trước; nếu chưa có → redirect OAuth flow; xử lý `?oauth=success|error` khi quay về
 
 ### 🐛 Bugfixes

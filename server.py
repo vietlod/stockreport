@@ -1192,7 +1192,7 @@ async def run_cleanup(_: bool = Depends(require_admin)):
 
 @app.get("/api/oauth2/start")
 async def oauth2_start(_: bool = Depends(require_admin)):
-    """Trả URL để redirect user đến Google consent. Production: https://stockreport.khoviet.com/oauth2callback"""
+    """Trả URL để redirect user đến Google consent. Production: https://stockreport.tnsai.vn/oauth2callback"""
     try:
         from google_sync import get_oauth_authorization_url
         url = get_oauth_authorization_url()
@@ -1232,7 +1232,7 @@ async def oauth2_status():
 async def oauth2_debug():
     """Debug: redirect_uri + client_id để so khớp với Google Cloud Console."""
     from urllib.parse import urlparse, parse_qs
-    redirect_uri = os.getenv("OAUTH_REDIRECT_URI", "https://stockreport.khoviet.com/oauth2callback")
+    redirect_uri = os.getenv("OAUTH_REDIRECT_URI", "https://stockreport.tnsai.vn/oauth2callback")
     result = {"redirect_uri": redirect_uri, "client_id": "", "error": None}
     try:
         from google_sync import get_oauth_authorization_url
@@ -1723,6 +1723,23 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 @app.get("/")
 async def index():
     return FileResponse(str(STATIC_DIR / "index.html"))
+
+
+@app.get("/robots.txt", include_in_schema=False)
+async def robots_txt():
+    from fastapi.responses import PlainTextResponse
+    robots_path = STATIC_DIR / "robots.txt"
+    if robots_path.exists():
+        return FileResponse(str(robots_path))
+    return PlainTextResponse("User-agent: *\nAllow: /\n")
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon_ico():
+    favicon_path = STATIC_DIR / "favicon.svg"
+    if favicon_path.exists():
+        return FileResponse(str(favicon_path), media_type="image/svg+xml")
+    return JSONResponse(status_code=404, content={"detail": "Not found"})
 
 
 # ── Run ─────────────────────────────────────────────────────────────────────

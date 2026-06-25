@@ -30,7 +30,7 @@ log = logging.getLogger("google_sync")
 
 # ── Config ──────────────────────────────────────────────────────────────────
 OAUTH_CREDENTIALS_FILE = os.getenv("GOOGLE_OAUTH_CREDENTIALS", "./google_oauth_credentials.json")
-OAUTH_REDIRECT_URI = os.getenv("OAUTH_REDIRECT_URI", "https://stockreport.khoviet.com/oauth2callback")
+OAUTH_REDIRECT_URI = os.getenv("OAUTH_REDIRECT_URI", "https://stockreport.tnsai.vn/oauth2callback")
 DRIVE_FOLDER_ID = os.getenv("GOOGLE_DRIVE_FOLDER_ID", "")
 SHEET_FOLDER_ID = os.getenv("GOOGLE_SHEET_FOLDER_ID", "")
 PDF_DIR = Path(os.getenv("PDF_DIR", "./pdf"))

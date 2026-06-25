@@ -34,6 +34,9 @@ Xây dựng kế hoạch hoàn chỉnh (lưu thành file ở @docs/haiquan_plan.
 
 Tiếp đến tạo file @docs/haiquan_tasks.md gồm các phase -> session -> Task cụ thể -> Checkpoint với các tiêu chí đánh giá, checklist rõ ràng để có thể check khi hoàn thành để triển khai.
 
+Running Python inspection script for xlsx data and writing comprehensive analysis script
+
+python _inspect_haiquan.py
 
 
 
@@ -99,27 +102,62 @@ https://files.customs.gov.vn/CustomsCMS/TONG_CUC/2022/6/10/PTVT-NKQ2-final.pdf -
 N -> NK
 X -> XK
 
+Hãy phân tích các file báo cáo của Hải Quan (dạng PDF) ở thư mục @D:\ECODATA\docs\haiquan\data với Cấu trúc và ý nghĩa của tên file được mô tả bên dưới. Sau đó, áp dụng cách tiếp của flow GSO (từ bố cục UI, cách định dạng hiển thị, Xuất file, đến việc ingestion các dữ liệu từ nguồn PDF vào database) vào flow Customs Data Explorer (/app) và Customs Data Manager (/admin/customs) để quản lý và tạo job ingestion.
+
+
+Ghi chú: có rất nhiều báo cáo của Hải Quan trong giai đoạn 2009 - 2026 với dung lượng hơn 1GB, do vậy, xây dựng chiến lược triển khai tạo job ingestion chạy nền liên kết với folder ID chứa các báo cáo trên Drive và lần lượt chạy đến khi hoàn thành ingest tất cả các báo cáo vào database. Cần tạo bảng điều khiển theo phong cách data platform chuyên nghiệp, hiện đại để giám sát trạng thái đang xử lý, ví dụ như: đang xử lý file nào, đã xử lý bao nhiêu file, còn bao nhiêu, đã ingest được bao nhiêu datapoints, % còn lại...
+
+
+
+Cấu trúc và ý nghĩa của tên file: [LOẠI BÁO CÁO]_[MÃ BÁO CÁO]_[KỲ BÁO CÁO]_[TÙY CHỌN]
+
+
+```
+1. Phần 1: LOẠI BÁO CÁO
+
+
+- CT: Chính thức
+- DC: Điều chỉnh
+- SB: Sơ bộ 
+
+
+2. Phần 2: KỲ BÁO CÁO
+
+- Năm
+
+- Q -> Quý
+
+- Tháng + Kỳ (nếu có)
 
 K1 -> Kỳ 1 trong tháng (từ ngày 1 đến ngày 15 của tháng)
 K2 -> Kỳ 2 trong tháng (từ ngày 16 đến hết tháng)
+T -> Tháng # (trọn tháng: đầu tháng đến cuối tháng)
 
-T#T -> Tháng # (trọn tháng: đầu tháng đến cuối tháng)
-
-Q -> Quý
-
+3. Phần 3: MÃ BÁO CÁO
 
 1X -> Biểu số 12B
 2X -> Biểu số 14B
 3X -> Biểu số 16B
 5X -> Biểu số 19B
 
-4 -> Biểu số 18B -> (TRỊ GIÁ XUẤT, NHẬP KHẨU CHIA THEO TỈNH/THÀNH PHỐ)
-PTVT -> Biểu số 1N-PTVT -> (NHẬP KHẨU HÀNG HÓA THEO PHƯƠNG THỨC VẬN TẢI)
+4 -> Biểu số 18B -> TRỊ GIÁ XUẤT, NHẬP KHẨU CHIA THEO TỈNH/THÀNH PHỐ
 
 1N -> Biểu số 13B
-3N -> Biểu số 15B
+2N -> Biểu số 15B
 3N -> Biểu số 17B
 5N -> Biểu số 20B
+
+
+Phần 4: TÙY CHỌN (nếu có)
+
+- PTVT -> NHẬP KHẨU HÀNG HÓA THEO PHƯƠNG THỨC VẬN TẢI
+- HTX -> HÀNG TÁI XUẤT
+```
+
+
+
+
+
 
 
 https://files.customs.gov.vn/CustomsCMS/TONG_CUC/2022/4/29/5002021-T12K1-1N(VN-CT).pdf
@@ -144,13 +182,13 @@ Sử dụng thông tin VPS Connection Standards bên dưới để deploy + test
 - Tạo thư mục dự án: /opt/stockreport
 - Pull lastest code từ nhánh dev remote về VPS để triển khai
 - Tham khảo @docs/vps.md để thiết lập port phù hợp cho ứng dụng Stock Report tránh conflict ports và ảnh hưởng đến các app khác đang hoạt động trên VPS
-- Thiết lập SSL Cerification cho stockreport.khoviet.com
+- Thiết lập SSL Cerification cho stockreport.tnsai.vn
 - Thiết lập Ngnix phù hợp để chạy ứng dụng
 
 ```
 **Project directory:** /opt/stockreport
 
-**URL Frontend:** stockreport.khoviet.com
+**URL Frontend:** stockreport.tnsai.vn
 
 
 **Tools Required:**

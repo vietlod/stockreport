@@ -77,7 +77,7 @@ JWT_SECRET=<random-string>
 
 # Google Integration (OAuth2 only)
 GOOGLE_OAUTH_CREDENTIALS=./google_oauth_credentials.json
-OAUTH_REDIRECT_URI=https://stockreport.khoviet.com/oauth2callback
+OAUTH_REDIRECT_URI=https://stockreport.tnsai.vn/oauth2callback
 GOOGLE_DRIVE_FOLDER_ID=<your-folder-id>
 GOOGLE_SHEET_FOLDER_ID=<your-folder-id>
 
@@ -93,13 +93,13 @@ HQ_DOWNLOAD_DELAY=1.0
 File `google_oauth_credentials.json` là OAuth2 Client credentials (web type).
 
 **Flow lần đầu (production):**
-1. Mở https://stockreport.khoviet.com → đăng nhập admin
+1. Mở https://stockreport.tnsai.vn → đăng nhập admin
 2. Bấm **Sync Drive** → redirect đến Google consent
 3. Đăng nhập Google account có quyền truy cập Drive folder
 4. Cho phép (Allow) → redirect về app, token lưu `_google_token.json`
 5. Lần sau không cần consent (token tự refresh)
 
-**Redirect URI** trong Google Cloud Console: `https://stockreport.khoviet.com/oauth2callback`
+**Redirect URI** trong Google Cloud Console: `https://stockreport.tnsai.vn/oauth2callback`
 
 **Lưu ý**: Nếu OAuth client dùng chung với app khác (vd. pdf2vid), không dùng `include_granted_scopes` — gây lỗi "Scope has changed".
 
@@ -247,7 +247,7 @@ Sync Drive/Sheet chạy trong background thread (daemon), **không phụ thuộc
   - Lỗi upload hiện trong progressNotes section
 - **Status API**: `GET /api/sync/status` trả trạng thái cả Drive và Sheet
 - **Diagnostic**: `GET /api/gdrive/test` — test upload 1 file PDF, trả kết quả chi tiết
-- **OAuth web flow**: production dùng redirect `https://stockreport.khoviet.com/oauth2callback`; `GET /api/oauth2/debug` để verify client_id + redirect_uri khớp Google Cloud Console
+- **OAuth web flow**: production dùng redirect `https://stockreport.tnsai.vn/oauth2callback`; `GET /api/oauth2/debug` để verify client_id + redirect_uri khớp Google Cloud Console
 
 ## Multi-Ticker Scraping
 
