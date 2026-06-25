@@ -36,3 +36,7 @@ pdf/
 # OS
 .DS_Store
 Thumbs.db
+
+# Raw crawled HTML dumps
+docs/list31_2021m12.txt
+
