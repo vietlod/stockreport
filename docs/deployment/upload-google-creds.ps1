@@ -1,13 +1,20 @@
 # Upload Google OAuth credentials + token to VPS
 # Run from project root: .\docs\deployment\upload-google-creds.ps1
 # Prerequisite: _google_token.json đã tạo (chạy OAuth flow local trước)
-
-$VPS_IP = "212.85.24.158"
-$VPS_USER = "root"
-$VPS_PASSWORD = "EcoData2025VPS@Secure-Pass123"
+# ── Credentials từ biến môi trường (KHÔNG hardcode) ──
+$VPS_IP = $env:VPS_IP
+$VPS_USER = $env:VPS_USER ?? "root"
+$VPS_PASSWORD = $env:VPS_PASSWORD
 $PSCP = "C:\Program Files\PuTTY\pscp.exe"
-$HOSTKEY = "SHA256:WCIu/MntsW6iVVem37UoYsMM8APL+/MQYe6vtbTmt2g"
+$PLINK = "C:\Program Files\PuTTY\plink.exe"
+$HOSTKEY = $env:VPS_HOSTKEY ?? "ssh-ed25519 255 SHA256:wv5FF9UZRKTipXip0cFxvz9Xl2FLIZBfLiDgTaVuop8"
 $PROJECT_DIR = "/opt/stockreport"
+
+# Validate
+if (-not $VPS_IP -or -not $VPS_PASSWORD) {
+    Write-Host "ERROR: Set env vars VPS_IP, VPS_PASSWORD first" -ForegroundColor Red
+    exit 1
+}
 
 $credFile = "google_oauth_credentials.json"
 $tokenFile = "_google_token.json"
@@ -28,7 +35,6 @@ Write-Host "Uploading $credFile and $tokenFile to VPS..." -ForegroundColor Cyan
 
 if ($LASTEXITCODE -eq 0) {
     Write-Host "Upload OK. Restarting stockreport service..." -ForegroundColor Gray
-    $PLINK = "C:\Program Files\PuTTY\plink.exe"
     & $PLINK -hostkey $HOSTKEY -pw $VPS_PASSWORD "${VPS_USER}@${VPS_IP}" "systemctl restart stockreport"
     Write-Host "Done." -ForegroundColor Green
 } else {
